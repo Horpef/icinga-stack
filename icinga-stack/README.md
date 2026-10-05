@@ -860,6 +860,11 @@ README.md                          este archivo
 verify.ps1                         comprobacion end-to-end
 mk-clean-test.ps1                  genera el proyecto aislado _clean-test/
 safety-net.ps1                     volcado plano de los 12 volumenes a .tar
+.gitattributes                     finales de linea: LF en .sh/.conf/.yml/
+                                   Dockerfile, CRLF en .ps1 (ver "Repositorio
+                                   git": autocrlf=true los romperia)
+.gitignore                         lo que no se versiona: _clean-test/, tmp/,
+                                   backups/ y los artefactos de herramientas
 
 backup/                            copias de seguridad (Duplicati)
   mysql-dump.sh                    bucle de mysqldump -> backup_staging
@@ -902,6 +907,53 @@ grafana/
   dashboards/icinga-stack.json     el dashboard provisionado (18 paneles)
 
 tmp/                               sondas y benchmarks descartables
+```
+
+## Repositorio git
+
+El proyecto está versionado en un repositorio **local** (rama `main`, sin
+remoto): no hay nada que empujar, solo historia que conservar. La
+identidad se guardó en la configuración **local** del repo, así que la
+global sigue sin tocar:
+
+```powershell
+git -C D:\docker\icinga-stack log --oneline
+git -C D:\docker\icinga-stack config user.name     # cambiar: --local o --global
+git -C D:\docker\icinga-stack status --ignored     # que ignora y que no
+```
+
+Se versiona **declaración, no resultado**. Todo lo que se puede regenerar
+con un script del propio proyecto queda fuera (`.gitignore`):
+`_clean-test/` (lo que crea `mk-clean-test.ps1`), `tmp/` (sondas y restos
+de depuración), `backups/` y los `*.tar` / `*.zip` / `*.dlist` del destino
+de copias. Es el mismo criterio con el que `project-mirror.sh` excluye su
+espejo, así que lo que se versiona y lo que se espeja coincide.
+
+El repositorio acaba también en **otro disco** sin que nadie haga nada:
+el espejo de `project-mirror` no excluye `.git`, así que a los 10 minutos
+`C:\docker-backups\project\` ya lleva el historial.
+
+### Por qué existe `.gitattributes`
+
+El Git de Windows de esta máquina trae **`core.autocrlf=true` a nivel de
+sistema** (se ve en `C:\Program Files\Git\etc\gitconfig`), que convierte
+LF → CRLF al hacer checkout. Para los `.sh` eso es letal: se ejecutan con
+`/bin/sh` dentro de contenedores Linux montados desde aquí, y dash los
+rechaza con `sh: 1: ...: \r: command not found`.
+
+Una regla explícita de `.gitattributes` manda sobre `autocrlf`, así que
+fija **LF** en `.sh`, `.conf`, `.yml`, `.json`, `.sql`, `.md` y el
+`Dockerfile` — que no lleva extensión, así que autocrlf no lo trata como
+texto y lo pasaría a CRLF sin más, con las líneas `RUN` dentro — y
+**CRLF** en los `.ps1`, que es lo habitual en Windows.
+
+La prueba no es leerse el fichero, es clonar y mirar los bytes:
+
+```powershell
+git clone D:\docker\icinga-stack $env:TEMP\clone-prueba
+git -C $env:TEMP\clone-prueba check-attr eol -- backup/check-backups.sh   # eol: lf
+# .. abrir $env:TEMP\clone-prueba\backup\check-backups.sh y confirmar LF
+Remove-Item -Recurse -Force $env:TEMP\clone-prueba
 ```
 
 ## Solución de problemas
@@ -1092,3 +1144,20 @@ primera sincronización de `project-mirror` y `dump.sql` con el primer volcado
 de `mysql-dump`. Esos dos contenedores tienen healthcheck propio, así que el
 sitio por el que mirar primero es `docker inspect icinga-project-mirror
 --format '{{.State.Health.Status}}'` y `docker logs icinga-mysql-dump`.
+
+**Un script falla con `sh: 1: ...: \r: command not found`.**
+Los finales de línea se fueron a CRLF y el `\r` viaja dentro de la línea
+hasta que dash intenta ejecutarla. Aquí solo puede pasar si alguien toca
+`.gitattributes` o clona con `autocrlf` forzado por encima de él:
+
+```powershell
+git check-attr eol -- backup/check-backups.sh   # tiene que decir: eol: lf
+git add --renormalize .
+git commit -m "renormaliza finales de linea"
+```
+
+Ojo con cómo se detecta: **`git status` en el repositorio original no se
+entera de nada**, porque los ficheros en disco ya estaban en LF y la
+corrupción solo aparece en el checkout de otro sitio. Lo que vale es la
+prueba del apartado *Repositorio git*: clonar a un directorio limpio y
+mirar los bytes. Hécha y superada en el commit inicial.
