@@ -429,7 +429,7 @@ pararlos dispararía alertas `CRITICAL` falsas a las 3 de la mañana.
 | `/sources/volumes/influxdb` | `influxdb_data` | histórico de métricas |
 | `/sources/volumes/grafana` | `grafana_data` | usuarios y preferencias |
 | `/sources/volumes/mailpit` | `mailpit_data` | mensajes capturados |
-| `/sources/project/…` | `backup/`, `docker-compose.yml`, `grafana/`, `icinga2-conf/`, `mysql-init/`, `web/`, `README.md`, `verify.ps1`, `mk-clean-test.ps1` | el propio proyecto |
+| `/sources/project/…` | `backup/`, `docker-compose.yml`, `grafana/`, `icinga2-conf/`, `mysql-init/`, `web/`, `README.md`, `safety-net.ps1`, `verify.ps1`, `mk-clean-test.ps1` | el propio proyecto |
 | ~~`db_data`~~ | **no está** | se respalda el volcado, no el datadir |
 | ~~`icinga2_cache` / `icinga2_spool`~~ | **no están** | cachés regenerables |
 
@@ -443,12 +443,12 @@ pararlos dispararía alertas `CRITICAL` falsas a las 3 de la mañana.
 
 ### Probar que funciona de verdad
 
-`verify.ps1` hace **30 comprobaciones de copias** (49 en total), incluida una
-**restauración** que compara el SHA256 de `README.md` recuperado con el
-original, más el espejo del proyecto y la red de seguridad:
+`verify.ps1` hace **32 comprobaciones de copias** (53 en total), incluida una
+**restauración** que compara el SHA256 de `README.md` y de `safety-net.ps1`
+recuperados con el original, más el espejo del proyecto y la red de seguridad:
 
 ```powershell
-.\verify.ps1            # 49 checks, TOTAL FALLOS: 0
+.\verify.ps1            # 53 checks, TOTAL FALLOS: 0
 ```
 
 A mano:
@@ -476,7 +476,7 @@ inspeccionar el historial y probar la restauración con
 > Este procedimiento se ejecutó de verdad sobre producción el 4-oct-2026:
 > `docker compose down -v`, levantamiento limpio y restauración completa.
 > Resultado: **`verify.ps1` → TOTAL FALLOS: 0**. (El recuento de checks
-> crece con el tiempo — eran 44 en esa primera ejecución; hoy son 49.)
+> crece con el tiempo — eran 44 en esa primera ejecución; hoy son 53.)
 
 **Qué borra y qué sobrevive** a un `docker compose down -v`:
 
@@ -587,6 +587,22 @@ No es un sustituto de Duplicati (que es la copia diaria programada), es la
 herramienta que permite *ensayar* una restauración sin miedo a no tener
 vuelta atrás.
 
+El propio `safety-net.ps1` **es origen de la copia de Duplicati**: además de
+vivir en git y en el espejo, se restaura desde el fileset. Ojo con el precio
+de añadirlo: el fichero de origen se monta **entrada por entrada** en
+`docker-compose.yml`, así que hacen falta las dos mitades — el `volumes:` de
+`duplicati` **y** el `Sources` de `backup/icinga-stack-backup.json` — y, como
+el alta en Duplicati es idempotente, aplicar el cambio en el servidor a mano:
+
+```powershell
+# 1. la fuente en el servidor (Duplicati solo acepta GET/POST en /backups,
+#    pero /api/v1/backup/1 si admite PUT; el JSON se edita y se reenvia)
+#    -> y en el contenedor, el bind mount de docker-compose.yml
+docker compose up -d duplicati
+# 2. una copia real para que el fichero entre en el fileset
+# 3. safety-net.ps1 -SoloCatalogo  (el catálogo refleja la config nueva)
+```
+
 ## Primer arranque
 
 Un arranque desde cero (`docker compose down -v` seguido de) :
@@ -687,14 +703,14 @@ de núcleos, de modo que los umbrales de `hosts.conf` se leen **por núcleo**
 (login con credenciales reales, 6 hosts / 32 servicios en OK — incluidos los
 cinco `Backup - *` —, los cuatro test del Director, una notificación que
 tiene que acabar en Mailpit, que InfluxDB esté recibiendo métricas y Grafana
-tenga el datasource y el dashboard provisionados, y **30 comprobaciones de
+tenga el datasource y el dashboard provisionados, y **32 comprobaciones de
 copias de seguridad** — volcado, alta declarativa, historial de Duplicati,
-lanzar una copia real, restaurar dos ficheros para compararlos, el espejo del
+lanzar una copia real, restaurar tres ficheros para compararlos, el espejo del
 proyecto y la red de seguridad):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\verify.ps1              # 49 checks
-powershell -ExecutionPolicy Bypass -File .\verify.ps1 -CleanTest   # 46 checks
+powershell -ExecutionPolicy Bypass -File .\verify.ps1              # 53 checks
+powershell -ExecutionPolicy Bypass -File .\verify.ps1 -CleanTest   # 50 checks
 # ===== TOTAL FALLOS: 0 =====
 ```
 

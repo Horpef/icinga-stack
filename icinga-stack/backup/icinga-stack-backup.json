@@ -19,6 +19,7 @@
       "/sources/project/mk-clean-test.ps1",
       "/sources/project/mysql-init",
       "/sources/project/README.md",
+      "/sources/project/safety-net.ps1",
       "/sources/project/verify.ps1",
       "/sources/project/web"
     ],

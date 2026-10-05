@@ -295,9 +295,11 @@ try {
         $src = @($d.Backup.Sources)
         $set = @($d.Backup.Settings | ForEach-Object { "$($_.Name)=$($_.Value)" })
 
-        Check "Duplicati: 17 origenes (volcado + volumenes + proyecto)" ($src.Count -ge 17) $src.Count
+        Check "Duplicati: 18 origenes (volcado + volumenes + proyecto)" ($src.Count -ge 18) $src.Count
         Check "Duplicati: el volcado de MySQL es origen" `
               ($src -contains "/sources/volumes/mysql-dump") ($src -join ", ")
+        Check "Duplicati: safety-net.ps1 es origen (la red de seguridad se copia)" `
+              ($src -contains "/sources/project/safety-net.ps1") ($src -join ", ")
         Check "Duplicati: docker-compose.yml es origen" `
               ($src -contains "/sources/project/docker-compose.yml") ($src -join ", ")
         Check "Duplicati: db_data NO es origen (se respalda el volcado)" `
@@ -323,28 +325,16 @@ try {
       }
       Check "Duplicati: ejecucion terminada" ($act -match '"Active":false') $act
 
-      curl.exe -s -X GET "$dup/api/v1/backup/$bid" -H $hf -o $df | Out-Null
-      $d2 = $null
-      try { $d2 = Get-Content $df -Raw | ConvertFrom-Json } catch {}
-      $meta = if ($d2) { $d2.Backup.Metadata } else { $null }
-      $err  = if ($meta) { $meta.LastErrorMessage } else { "sin metadata" }
-      Check "Duplicati: ultima copia sin errores" ([string]::IsNullOrEmpty($err)) $err
-      $nfs = 0
-      if ($meta -and $meta.TargetFilesetsCount) { $nfs = [int]$meta.TargetFilesetsCount }
-      Check "Duplicati: fileset creado" ($nfs -ge 1) $nfs
-      $ssz = 0
-      if ($meta -and $meta.SourceFilesSize) { $ssz = [int64]$meta.SourceFilesSize }
-      # Backstop grosero: si desapareciera uno de los volumenes grandes, el
-      # total se desploma. El valor depende del entorno (produccion ~128 MiB,
-      # un stack recien creado ~72 MiB porque InfluxDB aun no ha acumulado),
-      # por eso se fija en 30 MiB y no en algo ajustado a produccion.
-      Check "Duplicati: origen > 30 MiB (nada omitido)" ($ssz -gt 31457280) "$ssz bytes"
-
-      # El resultado real de la ultima operacion Backup. No sirve con mirar
-      # LastErrorMessage: Duplicati distingue exito, exito con avisos y
-      # error, y un aviso no deja rastro en la metadata. Se busca la entrada
+      # El resultado real de la ultima operacion Backup. Se busca la entrada
       # Backup del log porque las restauraciones de mas abajo se apilan
       # delante.
+      #
+      # OJO con Metadata.LastErrorMessage: era lo que usaba el chequeo de
+      # "sin errores" y no sirve. Duplicati lo deja fijado hasta el siguiente
+      # error de CUALQUIER operacion y no lo borra al volver a tener exito, de
+      # modo que un unico Restore fallido (una restauracion de prueba a ciegas
+      # de un fichero que aun no esta en el fileset, por ejemplo) dejaria este
+      # check en rojo para siempre. Los dos chequeos salen del mismo log.
       #
       # Ojo con `@($lr | ConvertFrom-Json)`: en PowerShell 5.1 ese array se
       # envuelve como UN solo elemento, asi que el bucle recorre una unica vez
@@ -362,6 +352,31 @@ try {
           if ($m1 -and $m1.MainOperation -eq "Backup") { $mm = $m1; break }
         }
       } catch {}
+
+      curl.exe -s -X GET "$dup/api/v1/backup/$bid" -H $hf -o $df | Out-Null
+      $d2 = $null
+      try { $d2 = Get-Content $df -Raw | ConvertFrom-Json } catch {}
+      $meta = if ($d2) { $d2.Backup.Metadata } else { $null }
+
+      if ($mm) {
+        Check "Duplicati: ultima copia sin errores" `
+              ([int]$mm.ErrorsActualLength -eq 0) `
+              "ParsedResult=$($mm.ParsedResult) Errors=$($mm.ErrorsActualLength)"
+      } else {
+        Check "Duplicati: ultima copia sin errores" $false "sin entrada Backup en el log"
+      }
+
+      $nfs = 0
+      if ($meta -and $meta.TargetFilesetsCount) { $nfs = [int]$meta.TargetFilesetsCount }
+      Check "Duplicati: fileset creado" ($nfs -ge 1) $nfs
+      $ssz = 0
+      if ($meta -and $meta.SourceFilesSize) { $ssz = [int64]$meta.SourceFilesSize }
+      # Backstop grosero: si desapareciera uno de los volumenes grandes, el
+      # total se desploma. El valor depende del entorno (produccion ~128 MiB,
+      # un stack recien creado ~72 MiB porque InfluxDB aun no ha acumulado),
+      # por eso se fija en 30 MiB y no en algo ajustado a produccion.
+      Check "Duplicati: origen > 30 MiB (nada omitido)" ($ssz -gt 31457280) "$ssz bytes"
+
       if ($mm) {
         $worst = "ParsedResult=$($mm.ParsedResult) Warnings=$($mm.WarningsActualLength) Errors=$($mm.ErrorsActualLength)"
         Check "Duplicati: ultima copia sin avisos" `
@@ -376,13 +391,19 @@ try {
       $dst = (docker exec $cDup sh -c "find /dest -type f -name duplicati-*.zip" 2>&1) -join "`n"
       Check "Duplicati: ficheros .zip en el destino" ($dst -match '\.zip') $dst
 
-      # 6.7 RESTAURACION: recuperar dos ficheros y compararlos con el original
+      # 6.7 RESTAURACION: recuperar tres ficheros y compararlos con el original
       # Los directorios destino se crean antes a proposito: si no, Duplicati
       # emite dos "CreateMissingFolder" y deja la copia con estado Warning en
       # la UI, cuando lo que ha fallado es nuestra propia comprobacion.
+      # OJO con cuantas rutas se pasan: Duplicati usa el ancestro comun de la
+      # seleccion como base, de modo que con UNA sola ruta /sources/project/x
+      # el fichero caeria en la raiz (restore_path/x) y no en
+      # restore_path/project/x. Al pedir rutas de /sources/project y de
+      # /sources/volumes a la vez la base es /sources y todo cae donde toca.
       docker exec $cDup sh -c "rm -rf /tmp/rtest; mkdir -p /tmp/rtest/volumes/mysql-dump /tmp/rtest/project" | Out-Null
       $pf = Join-Path $env:TEMP "verify_dup_restore.json"
-      $body = '{"paths":["/sources/project/README.md","/sources/volumes/mysql-dump/dump.sql"],' +
+      $body = '{"paths":["/sources/project/README.md","/sources/project/safety-net.ps1",' +
+              '"/sources/volumes/mysql-dump/dump.sql"],' +
               '"time":"","restore_path":"/tmp/rtest","overwrite":true,"skip_metadata":true}'
       [System.IO.File]::WriteAllText($pf, $body, (New-Object System.Text.UTF8Encoding($false)))
       curl.exe -s -X POST "$dup/api/v1/backup/$bid/restore" -H $hf `
@@ -390,14 +411,21 @@ try {
                -o (Join-Path $env:TEMP "verify_dup_restore_out.json") | Out-Null
       Start-Sleep -Seconds 10
       $tree = (docker exec $cDup sh -c "find /tmp/rtest -type f" 2>&1) -join "`n"
-      Check "Duplicati: restauracion con README.md y dump.sql" `
-            (($tree -match 'README\.md') -and ($tree -match 'dump\.sql')) $tree
+      Check "Duplicati: restauracion con README.md, safety-net.ps1 y dump.sql" `
+            (($tree -match 'README\.md') -and ($tree -match 'safety-net\.ps1') -and
+             ($tree -match 'dump\.sql')) $tree
 
       # bit a bit contra el original local
       $hashLocal = (Get-FileHash (Join-Path $projRoot "README.md") -Algorithm SHA256).Hash
       $hashBack = (docker exec $cDup sh -c "sha256sum /tmp/rtest/project/README.md" 2>&1) -join " "
       Check "Duplicati: README.md restaurado identico (SHA256)" `
             (($hashLocal.Length -eq 64) -and ($hashBack -match $hashLocal)) "$hashBack"
+
+      # y la red de seguridad, que es el fichero que protege el catalogo
+      $hashLocalSn = (Get-FileHash (Join-Path $projRoot "safety-net.ps1") -Algorithm SHA256).Hash
+      $hashBackSn = (docker exec $cDup sh -c "sha256sum /tmp/rtest/project/safety-net.ps1" 2>&1) -join " "
+      Check "Duplicati: safety-net.ps1 restaurado identico (SHA256)" `
+            (($hashLocalSn.Length -eq 64) -and ($hashBackSn -match $hashLocalSn)) "$hashBackSn"
 
       # el dump restaurado tiene que ser un volcado de verdad
       $rsz = (docker exec $cDup sh -c "wc -c < /tmp/rtest/volumes/mysql-dump/dump.sql" 2>&1) -join " "
