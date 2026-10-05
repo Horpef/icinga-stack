@@ -968,16 +968,27 @@ tmp/                               sondas y benchmarks descartables
 
 ## Repositorio git
 
-El proyecto está versionado en un repositorio **local** (rama `main`, sin
-remoto): no hay nada que empujar, solo historia que conservar. La
-identidad se guardó en la configuración **local** del repo, así que la
-global sigue sin tocar:
+El proyecto está versionado en git, rama `main`, con remoto en **GitHub**:
+`Horpef/icinga-stack` (**privado** — y tiene que serlo, porque el repo lleva
+credenciales en claro en `docker-compose.yml`, `verify.ps1` y `web/`). La
+identidad se guardó en la configuración **local** del repo, así que la global
+sigue sin tocar:
 
 ```powershell
 git -C D:\docker\icinga-stack log --oneline
+git -C D:\docker\icinga-stack remote -v            # origin -> GitHub, sin token en la URL
 git -C D:\docker\icinga-stack config user.name     # cambiar: --local o --global
 git -C D:\docker\icinga-stack status --ignored     # que ignora y que no
 ```
+
+El push va con un Personal Access Token (alcance `repo`) guardado en el
+**Almacenamiento de credenciales de Windows** bajo `git:https://github.com`,
+a través de `credential.helper = manager` que ya traía el Git de Windows. El
+token **no** está en la URL de `origin` ni en `.git/config`, que es justo lo
+que hay que evitar: `.git/config` lo copia el espejo del proyecto a
+`C:\docker-backups\project\` y acabaría en la copia. Si el token caduca, el
+siguiente `git push` abre la ventana del gestor de credenciales para poner
+uno nuevo; no hay que tocar nada más.
 
 Se versiona **declaración, no resultado**. Todo lo que se puede regenerar
 con un script del propio proyecto queda fuera (`.gitignore`):
