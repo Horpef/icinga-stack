@@ -90,15 +90,55 @@ Enlaces:
 La definición vive en `icinga2-conf/conf.d/stack-monitoring.conf`:
 
 * **6 hosts**: `icinga2`, `icinga-web`, `icingadb`, `mariadb`, `redis`, `mailpit`
-* **31 servicios**: ping/TCP de cada servicio, HTTP y HTTPS de la web
+* **32 servicios**: ping/TCP de cada servicio, HTTP y HTTPS de la web
   (esperan 302, que es lo que devuelve el login), API de Icinga 2 (200 con
-  auth), UI de Mailpit, conexión/uptime/uso de MySQL, disco, carga, procesos…
-  y los **5 `Backup - *`** descritos más abajo.
+  auth), UI de Mailpit, conexión/uptime/uso de MySQL, disco, carga, procesos…,
+  el **heartbeat de Icinga DB** (ver la sección propia) y los **5
+  `Backup - *`** descritos más abajo.
 * **8 hostgroups**: `stack-database`, `stack-cache`, `stack-monitoring`,
   `stack-web`, `stack-mail`, `stack-all`…
 
 Cualquier servicio en fallo dispara una notificación por correo a los
 miembros de `icingaadmins`, que aterriza en Mailpit.
+
+### Icinga DB: el daemon que no se puede sondear
+
+`icingadb` es el único contenedor del stack **sin healthcheck**, y no es un
+descuido: la imagen `icinga/icingadb` es *distroless* — no lleva `sh`, ni
+`curl`, ni `wget`, y su binario solo ofrece `--version`, `-c` y
+`--database-auto-import`. Tampoco publica ningún puerto (6666, 8080, 8086,
+9090 y 9981, sondeados desde `monitoring-net`: los cinco cerrados). Un `ping`
+era todo lo que lo vigilaba: alcanza para ver el contenedor caído, pero es
+**ciego ante un daemon colgado**, justo el fallo que dejaría Icinga Web
+sirviendo datos viejos con todo lo demás en verde.
+
+Se mide desde fuera, por MySQL, con el comando stock `mysql_query`:
+
+| Servicio | Mide | Aviso | Crítico |
+|---|---|---|---|
+| `Icinga DB - Heartbeat` | segundos desde la última latida en `icingadb_instance.heartbeat` | 180 s | 600 s |
+
+Por qué ese campo y no otro. Medido sobre un stack sano durante 75 s,
+`host_state.last_update`, `service_state.last_update` y
+`state_history.event_time` **no se movieron ni un segundo**: solo avanzan con
+un cambio de estado, no con cada check, así que se pondrían rojos en
+cualquier media hora en blanco. El `heartbeat` sí late solo, cada ~70 s. Los
+tres estados se probaron con el plugin antes de tocar la configuración
+(`SELECT 250` → WARNING, `SELECT 5000` → CRITICAL).
+
+Que sea Icinga DB quien escribe ese campo no es una suposición:
+`information_schema.PROCESSLIST` muestra las seis conexiones con `db=icingadb`
+saliendo todas de `172.19.0.2`, que es el contenedor, mientras que Icinga 2
+solo tiene abierta una con `db=icinga2`. Si el daemon se cuelga, esas
+conexiones siguen ahí pero dejan de ejecutar la escritura, y el latido
+envejece.
+
+Los umbrales van contra ese periodo real (un latido perdido de más no llega
+a los 180 s) y contra los parámetros del stack: los servicios corren con 5
+intentos y `retry_interval` de 30 s, así que hay **2,5 min de gracia antes de
+que algo pase a HARD** — más de lo que Icinga DB tarda en latir tras un
+arranque. Encender la PC después de una noche apagada se autocorrige sin
+notificar.
 
 ### Las copias, vigiladas en continuo
 
@@ -460,7 +500,7 @@ docker compose up -d
 
 | Qué | Origen | Resultado |
 |---|---|---|
-| Hosts, servicios, Director, Icinga Web | *se reconstruyen solos* | 6 hosts / 31 servicios sin restaurar nada |
+| Hosts, servicios, Director, Icinga Web | *se reconstruyen solos* | 6 hosts / 32 servicios sin restaurar nada |
 | `README.md` (y todo el proyecto) | Duplicati | SHA256 idéntico al original |
 | Histórico de métricas | Duplicati → `influxdb_data` | 21 ficheros; `ping4` 51 → **2050** puntos |
 | Histórico de MySQL | Duplicati → `dump.sql` | notificaciones 0 → **58**, grants intactos |
@@ -643,7 +683,7 @@ de núcleos, de modo que los umbrales de `hosts.conf` se leen **por núcleo**
 ## Verificación
 
 `verify.ps1` comprueba todo de una pasada y devuelve el número de fallos
-(login con credenciales reales, 6 hosts / 31 servicios en OK — incluidos los
+(login con credenciales reales, 6 hosts / 32 servicios en OK — incluidos los
 cinco `Backup - *` —, los cuatro test del Director, una notificación que
 tiene que acabar en Mailpit, que InfluxDB esté recibiendo métricas y Grafana
 tenga el datasource y el dashboard provisionados, y **30 comprobaciones de
@@ -891,7 +931,7 @@ mysql-init/                        solo en el primer arranque de un volumen
 icinga2-conf/                      montado en /etc/icinga2 (read-only)
   conf.d/hosts.conf                objeto Host NodeName + umbrales de carga
   conf.d/api-users.conf            ApiUser `icingaweb` con permisos "*"
-  conf.d/stack-monitoring.conf     los 6 hosts, 8 hostgroups, 31 servicios
+  conf.d/stack-monitoring.conf     los 6 hosts, 8 hostgroups, 32 servicios
   features-enabled/icingadb.conf   Icinga 2 -> Redis
   features-enabled/ido-mysql.conf  Icinga 2 -> MySQL `icinga2`
   features-enabled/influxdb.conf   Icinga 2 -> InfluxDB (perfdata)
@@ -1087,7 +1127,7 @@ reiniciarlo no basta: ni los montajes ni las variables de entorno se aplican
 si no se recrea. La validación:
 
 ```powershell
-docker exec icinga2 icinga2 daemon -C          # exit 0, "Instantiated 31 Services"
+docker exec icinga2 icinga2 daemon -C          # exit 0, "Instantiated 32 Services"
 docker exec -u 5665 icinga2 /bin/sh /usr/lib/nagios/plugins/check-backups.sh `
   --test destino --warn 93600 --crit 180000
 docker exec -u 5665 icinga2 /bin/sh /usr/lib/nagios/plugins/check-backups.sh `

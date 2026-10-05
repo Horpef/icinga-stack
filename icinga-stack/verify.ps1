@@ -82,7 +82,7 @@ try {
   Check "API: >= 6 hosts" ($hosts.Count -ge 6) $hosts.Count
   curl.exe -sk -u "icingaweb:icingaweb123" -H "Accept: application/json" "$api/v1/objects/services" -o $js | Out-Null
   $services = @((Get-Content $js -Raw | ConvertFrom-Json).results)
-  Check "API: >= 30 servicios" ($services.Count -ge 30) $services.Count
+  Check "API: >= 31 servicios" ($services.Count -ge 31) $services.Count
 
   # Los cinco servicios que vigilan las copias (seccion 6 y
   # icinga2-conf/conf.d/stack-monitoring.conf). Se comprueban por nombre y
@@ -101,6 +101,13 @@ try {
   Check "API: 5 servicios 'Backup - *' vigilando las copias" `
        ($bak.Count -ge 5 -and $faltan.Count -eq 0) `
        "$($bak.Count) en total; faltan: $(if ($faltan.Count) { $faltan -join ', ' } else { 'ninguno' })"
+
+  # El heartbeat de Icinga DB: el daemon no publica puerto y su imagen no
+  # admite healthcheck, asi que este servicio es lo unico que lo vigila.
+  # Tambien por nombre: el recuento cuadraria aunque desapareciera.
+  $hb = @($services | Where-Object { $_.attrs.__name -eq 'icingadb!Icinga DB - Heartbeat' })
+  Check "API: servicio 'Icinga DB - Heartbeat' presente" ($hb.Count -eq 1) "$($hb.Count) encontrado(s)"
+
   $bad = @($services | Where-Object { $_.attrs.state -ne 0 })
 
   # Tras un reinicio del stack los checks tardan en asentarse: los que se
