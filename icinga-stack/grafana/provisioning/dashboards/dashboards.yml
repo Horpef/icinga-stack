@@ -1,0 +1,16 @@
+apiVersion: 1
+
+# Every *.json under /etc/grafana/dashboards (bind-mounted from
+# ./grafana/dashboards) is loaded as a dashboard. Grafana re-scans the
+# directory every 30 s, so editing a JSON does not require a restart.
+providers:
+  - name: icinga-stack
+    orgId: 1
+    folder: Icinga
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false

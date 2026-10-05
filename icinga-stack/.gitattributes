@@ -1,0 +1,36 @@
+# ============================================================================
+#  Finales de linea
+# ============================================================================
+#
+#  El Git de Windows de esta maquina trae core.autocrlf=true a nivel de
+#  sistema (se ve en C:\Program Files\Git\etc\gitconfig). Eso convierte
+#  LF -> CRLF al hacer checkout. Para los .sh es letal: se ejecutan con
+#  /bin/sh dentro de contenedores Linux montados desde aqui, y dash los
+#  rechaza con  sh: 1: <script>: \r: command not found
+#
+#  Una regla explicita de .gitattributes manda sobre autocrlf, asi que da
+#  igual que esa opcion cambie: aqui se fija LF en todo lo que procesa algo
+#  que no es Windows. Sin este fichero, un `git clone` futuro romperia el
+#  stack de una forma que solo se veria al intentar lanzar un check.
+
+*.sh           text eol=lf
+*.conf         text eol=lf
+*.json         text eol=lf
+*.yml          text eol=lf
+*.yaml         text eol=lf
+*.sql          text eol=lf
+*.md           text eol=lf
+.gitignore     text eol=lf
+.gitattributes text eol=lf
+
+# Sin extension, asi que autocrlf no lo detecta como texto y lo pasaria a
+# CRLF sin mas. En un Dockerfile las lineas RUN se ejecutan con /bin/sh, y
+# un \r final en medio de un `&&` acaba en:  sh: 1: ...: not found
+Dockerfile     text eol=lf
+*.dockerfile   text eol=lf
+
+# Los .ps1 los ejecuta PowerShell 5.1 en Windows, que se come los dos
+# formatos sin problema. Se declara CRLF porque es lo habitual en Windows y
+# cambia el resultado del checkout, no el del repositorio: el indice sigue
+# guardando LF.
+*.ps1          text eol=crlf

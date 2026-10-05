@@ -1,0 +1,37 @@
+{
+  "Backup": {
+    "Name": "icinga-stack",
+    "Description": "Copia completa del stack de monitoria: volumenes Docker y ficheros de configuracion del proyecto. MySQL no se copia como datadir en caliente sino como volcado consistente de mysqldump (ver backup/mysql-dump.sh).",
+    "TargetURL": "file:///dest/icinga-stack",
+    "Sources": [
+      "/sources/volumes/mysql-dump",
+      "/sources/volumes/icinga2-etc",
+      "/sources/volumes/icinga2-lib",
+      "/sources/volumes/icinga-web",
+      "/sources/volumes/redis",
+      "/sources/volumes/influxdb",
+      "/sources/volumes/grafana",
+      "/sources/volumes/mailpit",
+      "/sources/project/backup",
+      "/sources/project/docker-compose.yml",
+      "/sources/project/grafana",
+      "/sources/project/icinga2-conf",
+      "/sources/project/mk-clean-test.ps1",
+      "/sources/project/mysql-init",
+      "/sources/project/README.md",
+      "/sources/project/verify.ps1",
+      "/sources/project/web"
+    ],
+    "Settings": [
+      { "Name": "--no-encryption", "Value": "true" },
+      { "Name": "retention-policy", "Value": "14D:0s,8W:7D,1Y:30D" },
+      { "Name": "log-retention", "Value": "30D" }
+    ],
+    "Filters": []
+  },
+  "Schedule": {
+    "Time": "2026-10-05T03:00:00",
+    "Repeat": "1D",
+    "AllowedDays": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+  }
+}

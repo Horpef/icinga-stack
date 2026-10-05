@@ -1,0 +1,1093 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 1.5 },
+              { "color": "red", "value": 3 }
+            ]
+          },
+          "unit": "none",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "line" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "1 min",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"1 min\" FROM \"load\" WHERE \"metric\" = 'scaled_load1' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        },
+        {
+          "alias": "5 min",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"5 min\" FROM \"load\" WHERE \"metric\" = 'scaled_load5' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "B",
+          "resultFormat": "time_series"
+        },
+        {
+          "alias": "15 min",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"15 min\" FROM \"load\" WHERE \"metric\" = 'scaled_load15' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "C",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Carga media por núcleo (warn 1.5 / crit 3.0)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Contadores de estado que Icinga 2 publica con el check 'icinga'. Si 'servicios CRITICAL' deja de ser 0, hay una incidencia.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "decimals": 0,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "none",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "servicios CRITICAL" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "servicios WARNING" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "servicios OK" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "hosts UP",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"hosts UP\" FROM \"icinga\" WHERE \"metric\" = 'num_hosts_up' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        },
+        {
+          "alias": "servicios OK",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"servicios OK\" FROM \"icinga\" WHERE \"metric\" = 'num_services_ok' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "B",
+          "resultFormat": "time_series"
+        },
+        {
+          "alias": "servicios CRITICAL",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"servicios CRITICAL\" FROM \"icinga\" WHERE \"metric\" = 'num_services_critical' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "C",
+          "resultFormat": "time_series"
+        },
+        {
+          "alias": "servicios WARNING",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"servicios WARNING\" FROM \"icinga\" WHERE \"metric\" = 'num_services_warning' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "D",
+          "resultFormat": "time_series"
+        },
+        {
+          "alias": "servicios UNKNOWN",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"servicios UNKNOWN\" FROM \"icinga\" WHERE \"metric\" = 'num_services_unknown' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "E",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Estado del stack — hosts y servicios",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Check 'hostalive' (ping). Una caída a 0 ms o un hueco en la línea significa que el host dejó de responder.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "ms",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "id": 3,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") * 1000 AS \"RTT\" FROM \"hostalive\" WHERE \"metric\" = 'rta' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval), \"hostname\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Ping — tiempo de respuesta por host",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Porcentaje de paquetes perdidos en el check 'hostalive'.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "decimals": 1,
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "percentunit0-100",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"pérdida\" FROM \"hostalive\" WHERE \"metric\" = 'pl' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval), \"hostname\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Ping — pérdida de paquetes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Último valor de los checks 'procs' y 'users' del host seleccionado.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "id": 5,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "alias": "procesos",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT last(\"value\") AS \"procesos\" FROM \"procs\" WHERE \"hostname\" =~ /^$host$/ AND time > now() - 30m",
+          "rawQuery": true,
+          "instant": true,
+          "refId": "A",
+          "resultFormat": "table"
+        },
+        {
+          "alias": "sesiones de usuario",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT last(\"value\") AS \"sesiones de usuario\" FROM \"users\" WHERE \"hostname\" =~ /^$host$/ AND time > now() - 30m",
+          "rawQuery": true,
+          "instant": true,
+          "refId": "B",
+          "resultFormat": "table"
+        }
+      ],
+      "title": "Procesos y sesiones de usuario (actual)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Checks 'http' (check_http): tiempo total de la petición a cada servicio web.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "ms",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 16 },
+      "id": 6,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname / $tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") * 1000 AS \"tiempo\" FROM \"http\" WHERE \"metric\" = 'time' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "HTTP — tiempo de respuesta",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Checks 'tcp': tiempo en establecer la conexión TCP con cada puerto monitorizado.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "ms",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 16 },
+      "id": 7,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname / $tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") * 1000 AS \"tiempo\" FROM \"tcp\" WHERE \"metric\" = 'time' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "TCP — tiempo de conexión",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Check 'disk': espacio ocupado en el sistema de archivos raíz.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "bytes",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 16 },
+      "id": 8,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname / $tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"usado\" FROM \"disk\" WHERE \"metric\" = '/' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Disco — espacio usado",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Métrica interna 'avg_latency' / 'max_latency' de Icinga 2: retraso entre que un check termina y Icinga 2 lo procesa.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "s",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
+      "id": 9,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "latencia media",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"latencia media\" FROM \"icinga\" WHERE \"metric\" = 'avg_latency' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        },
+        {
+          "alias": "latencia máxima",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"latencia máxima\" FROM \"icinga\" WHERE \"metric\" = 'max_latency' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "B",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Icinga 2 — latencia del motor",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Métrica interna 'avg_execution_time' / 'max_execution_time': duración de la ejecución de los checks.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "s",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 },
+      "id": 10,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "media",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"media\" FROM \"icinga\" WHERE \"metric\" = 'avg_execution_time' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        },
+        {
+          "alias": "máxima",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"máxima\" FROM \"icinga\" WHERE \"metric\" = 'max_execution_time' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "B",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Icinga 2 — duración de los checks",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Tráfico del API JSON-RPC de Icinga 2 (métricas sum_bytes_sent_per_second / sum_bytes_received_per_second).",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "Bps",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+      "id": 11,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "enviados/s",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"enviados/s\" FROM \"icinga\" WHERE \"metric\" = 'sum_bytes_sent_per_second' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        },
+        {
+          "alias": "recibidos/s",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"recibidos/s\" FROM \"icinga\" WHERE \"metric\" = 'sum_bytes_received_per_second' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "B",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Icinga 2 — tráfico del API",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Contador 'Queries' del check_mysql, derivado a tasa por segundo.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "ops",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 32 },
+      "id": 12,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "consultas/s",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT non_negative_derivative(mean(\"value\"), 1s) AS \"consultas/s\" FROM \"mysql\" WHERE \"metric\" = 'Queries' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "MySQL — consultas por segundo",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Métricas Threads_connected y Threads_running del check_mysql.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "decimals": 1,
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "none",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 32 },
+      "id": 13,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "conexiones",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"conexiones\" FROM \"mysql\" WHERE \"metric\" = 'Threads_connected' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        },
+        {
+          "alias": "hilos activos",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"hilos activos\" FROM \"mysql\" WHERE \"metric\" = 'Threads_running' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval) fill(null)",
+          "rawQuery": true,
+          "refId": "B",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "MySQL — conexiones y hilos",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Check 'swap': memoria intercambiada usada.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "bytes",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 15,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 32 },
+      "id": 14,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname / $tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"swap usado\" FROM \"swap\" WHERE \"metric\" = 'swap' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Memoria — swap usado",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Segundos desde el ultimo `duplicati-*.zip` subido al destino. Umbrales del servicio de Icinga 'Backup - Last upload': aviso a las 26 h y critico a las 50 h, porque la programacion corre todos los dias a las 03:00.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "s",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 40 },
+      "id": 15,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"segundos\" FROM \"backup_health\" WHERE \"metric\" = 'age_s' AND \"service\" = 'Backup - Last upload' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Copias — antiguedad de la ultima copia",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Segundos desde la ultima sincronizacion del espejo del proyecto y desde el ultimo volcado de MySQL. Ambos trabajos corren cada 10 min, asi que la grafica tiene que ser un diente de sierra y no una linea plana. Umbrales de Icinga: 45 min / 3 h para el espejo y 20 min / 45 min para el volcado. El programador de Duplicati no entra aqui a proposito: mide horas, no minutos, y reventaria la escala de los otros dos.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "s",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 40 },
+      "id": 16,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"segundos\" FROM \"backup_health\" WHERE \"metric\" = 'age_s' AND \"service\" != 'Backup - Last upload' AND \"service\" != 'Backup - Scheduled run' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Copias — frescura del volcado y del espejo",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Gigabytes libres en el disco que guarda las copias (C:\\docker-backups, un SSD de 256 GB). Umbrales de Icinga 'Backup - Free space': aviso por debajo de 20 GB y critico por debajo de 5 GB.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "none",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 40 },
+      "id": 17,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"gb\" FROM \"backup_health\" WHERE \"metric\" = 'free_gb' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Copias — espacio libre en el destino (GB)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Segundos desde la ultima vez que el programador de Duplicati disparo una copia EL SOL, sin que nadie se lo pidiera. No es lo mismo que el primer panel: las copias lanzadas por verify.ps1 actualizan ese y NO este, asi que este es el unico que se queda parado si la tarea diaria muere. Umbrales de Icinga 'Backup - Scheduled run': aviso a las 30 h y critico a las 36 h, porque un trabajo sano dispara cada 24 h.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "s",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 40 },
+      "id": 18,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"segundos\" FROM \"backup_health\" WHERE \"metric\" = 'age_s' AND \"service\" = 'Backup - Scheduled run' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Copias — ultima ejecucion del programador",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["icinga", "monitoring", "stack"],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+        "definition": "SHOW TAG VALUES FROM \"hostalive\" WITH KEY = \"hostname\"",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Host",
+        "multi": true,
+        "name": "host",
+        "options": [],
+        "query": "SHOW TAG VALUES FROM \"hostalive\" WITH KEY = \"hostname\"",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Icinga Stack — métricas de los servicios",
+  "uid": "icinga-stack",
+  "version": 1,
+  "weekStart": ""
+}

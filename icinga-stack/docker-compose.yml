@@ -1,0 +1,648 @@
+services:
+  mariadb:
+    image: mysql:8.0
+    container_name: icinga-db
+    # --- durability vs. speed ------------------------------------------------
+    # Measured on this machine (Windows 11 / Docker Desktop / WSL2): fsync()
+    # costs ~440 ms instead of the usual <1 ms, because the ext4 filesystem
+    # inside the WSL2 VM sits on top of NTFS. The stock MySQL settings do two
+    # fsyncs per transaction (redo log + binary log), i.e. ~440 ms per commit.
+    # Everything that writes row by row becomes unusably slow:
+    #   * `mysqld --initialize`  4-8 min   (usually <1 min)
+    #   * IDO schema import      7.5 min
+    #   * Director kickstart     ~63 min   (254 commands, ~15 INSERTs each)
+    # With these two options the same benchmark drops from 441 ms to 8 ms per
+    # commit (55x), which turns the whole first boot from ~75 min into a few
+    # minutes.
+    #
+    # What is given up: `innodb_flush_log_at_trx_commit=2` writes the redo log
+    # into the OS cache on every commit and flushes it once per second, so an
+    # *unclean* crash can lose at most the last second of transactions. A
+    # normal `docker compose down` / container stop is a clean shutdown and
+    # still flushes everything. Losing the last second of monitoring state or
+    # of a Director edit on a hard crash is an acceptable trade here.
+    #
+    # Passed as command line options (not a .cnf) on purpose: the image's
+    # entrypoint forwards "$@" to `--initialize-insecure`, to the temporary
+    # schema-import server and to the final server, so the tuning already
+    # applies while a fresh volume is being built.
+    command:
+      - --innodb-flush-log-at-trx-commit=2
+      - --sync-binlog=0
+    environment:
+      MYSQL_ROOT_PASSWORD: icinga_root
+      MYSQL_DATABASE: icinga2
+      MYSQL_USER: icinga
+      MYSQL_PASSWORD: icinga_pass
+    volumes:
+      - db_data:/var/lib/mysql
+      # Creates the `icingadb` and `director` databases and grants the
+      # `icinga` user access (only runs on a fresh volume).
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - icinga-net
+    restart: unless-stopped
+    healthcheck:
+      # MUST use TCP (-h 127.0.0.1) instead of the Unix socket (-h localhost).
+      # On a fresh volume MySQL first runs a *temporary* server with
+      # --skip-networking ("port: 0" in the entrypoint log) to execute
+      # ./mysql-init. `mysqladmin ping` exits 0 as soon as any server answers,
+      # so a socket based check turns healthy before port 3306 exists.
+      # Compose then starts icinga-web, which loops forever with
+      # "SQLSTATE[HY000] [2002] Connection refused" and goes unhealthy itself.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -P 3306 -uroot -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      # First boot has to create the data directory and load ./mysql-init
+      # before the final server opens port 3306. Measured on this machine
+      # (WSL2, 4 cores): `--initialize` alone takes 4-8.5 min and the IDO
+      # schema import several minutes more => ~10-13 min end to end when the
+      # machine is loaded. Failures inside `start_period` keep the state at
+      # `starting` instead of `unhealthy`, so `depends_on: service_healthy`
+      # keeps waiting instead of aborting `docker compose up` with
+      # "dependency mariadb failed to start".
+      # A too-short value (300s) was the second bug found by the clean-volume
+      # test. It does NOT delay a healthy start: the first successful check
+      # marks the container healthy immediately, even inside start_period.
+      start_period: 1800s
+
+  redis:
+    image: redis:7-alpine
+    container_name: icinga-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - icinga-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Daemon that imports Icinga 2's configuration and current state from
+  # Redis into the `icingadb` MySQL database (read by Icinga DB Web).
+  icingadb:
+    image: icinga/icingadb:latest
+    container_name: icingadb
+    environment:
+      ICINGADB_REDIS_HOST: redis
+      ICINGADB_REDIS_PORT: 6379
+      ICINGADB_DATABASE_HOST: mariadb
+      ICINGADB_DATABASE_PORT: 3306
+      ICINGADB_DATABASE_DATABASE: icingadb
+      ICINGADB_DATABASE_USER: icinga
+      ICINGADB_DATABASE_PASSWORD: icinga_pass
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - icinga-net
+    restart: unless-stopped
+
+  # Local SMTP test server. UI: http://localhost:8025
+  # Outgoing notification mails of Icinga 2 end up here (MSMTPRC below).
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: mailpit
+    environment:
+      # Without MP_DATABASE Mailpit uses a random temp file under /tmp, so the
+      # captured notification mails vanished on every `docker compose up`.
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_MESSAGES: 5000
+    volumes:
+      - mailpit_data:/data
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+    networks:
+      - icinga-net
+    restart: unless-stopped
+    healthcheck:
+      # The image ships no healthcheck; the API endpoint is enough to prove
+      # the web UI (8025) is answering.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:8025/api/v1/messages?limit=1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Time-series database: receives the performance data of every check from
+  # Icinga 2 (InfluxdbWriter feature) and stores it so it can be graphed.
+  # Only reachable from the compose network - Grafana is the UI for it.
+  influxdb:
+    image: influxdb:1.8
+    container_name: influxdb
+    environment:
+      # The image's entrypoint runs these on the FIRST start of a fresh
+      # volume, which is what creates the database. Without it InfluxDB
+      # answers 404 "database not found" to every write and the whole
+      # feature is silently useless.
+      INFLUXDB_DB: icinga2
+      # Auth disabled on purpose: no host port is published, so the only
+      # way in is the internal network, and neither Icinga 2 nor Grafana
+      # would benefit from it.
+      INFLUXDB_HTTP_AUTH_ENABLED: "false"
+      # Retention is left at the image default (infinite) on purpose: the
+      # stack writes ~26 services x ~10 metrics, which is only a few MB per
+      # year. `influx -execute "CREATE RETENTION POLICY ..."` can cap it
+      # later if the volume ever matters.
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+    networks:
+      - icinga-net
+    restart: unless-stopped
+    healthcheck:
+      # `influx` (the CLI) ships in the image; querying SHOW DATABASES over
+      # HTTP proves the process is up AND that port 8086 answers.
+      test: ["CMD", "influx", "-format", "json", "-execute", "SHOW DATABASES"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      # Only has to initialise /var/lib/influxdb and create the database.
+      start_period: 60s
+
+  # Dashboards. The InfluxDB data source and the dashboard JSON are
+  # provisioned from ./grafana, so a fresh volume comes up ready to use
+  # without a single click in the UI. Login: admin / icingaadmin123
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: icingaadmin123
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Otherwise Grafana phones home to grafana.com on every start.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      # Provisioned dashboards are files; don't let the UI overwrite them.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/icinga-stack.json
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    networks:
+      - icinga-net
+    restart: unless-stopped
+    healthcheck:
+      # The image has no healthcheck; /api/health is the documented
+      # unauthenticated endpoint and does not depend on the data sources.
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/health | grep -q ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+
+  icinga2:
+    image: icinga/icinga2:latest
+    container_name: icinga2
+    environment:
+      ICINGA_MASTER: "1"
+      # Stable node identity: without this, `icinga api setup` names the
+      # Endpoint after the (random) container hostname, which Director's
+      # kickstart.ini (endpoint = icinga2) would then not find.
+      ICINGA_CN: icinga2
+      MYSQL_HOST: mariadb
+      MYSQL_DATABASE: icinga2
+      MYSQL_USER: icinga
+      MYSQL_PASSWORD: icinga_pass
+      # Written to /var/lib/icinga2/.msmtprc by the image entrypoint on the
+      # very first start (only if that file does not exist yet), so all
+      # notification mail goes to Mailpit instead of a local MTA.
+      MSMTPRC: |
+        # The account must be named "default": msmtp is called without
+        # --account, and versions >= 1.8 no longer fall back to the only
+        # account defined in the file ("account default not found").
+        account default
+        host mailpit
+        port 1025
+        tls off
+        auth off
+        from icinga@localhost
+        logfile /var/lib/icinga2/msmtp.log
+      # Credenciales de la API de Duplicati, solo para la prueba
+      # `programada` del plugin (backup/check-backups.sh). No sirve mirar
+      # el disco para saber si el programador diario sigue vivo, porque
+      # verify.ps1 lanza copias al ejecutarse y dejaria `destino` en verde:
+      # la unica senal fiable es Schedule.LastRun, que solo escribe el
+      # programador, y esa solo se lee por API. `duplicati` resuelve en la
+      # misma red (monitoring-net), igual en la copia clean-test.
+      DUP_API: http://duplicati:8200/api/v1
+      DUP_USER: admin
+      DUP_PASSWORD: icingaadmin123
+      BACKUP_NAME: icinga-stack
+    ports:
+      - "5665:5665"
+    volumes:
+      - icinga2_data:/etc/icinga2
+      - icinga2_lib:/var/lib/icinga2
+      - icinga2_cache:/var/cache/icinga2
+      - icinga2_spool:/var/spool/icinga2
+      - ./icinga2-conf/conf.d/hosts.conf:/etc/icinga2/conf.d/hosts.conf:ro
+      - ./icinga2-conf/conf.d/api-users.conf:/etc/icinga2/conf.d/api-users-icingaweb.conf:ro
+      - ./icinga2-conf/conf.d/stack-monitoring.conf:/etc/icinga2/conf.d/stack-monitoring.conf:ro
+      - ./icinga2-conf/features-enabled/icingadb.conf:/etc/icinga2/features-enabled/icingadb.conf:ro
+      - ./icinga2-conf/features-enabled/ido-mysql.conf:/etc/icinga2/features-enabled/ido-mysql.conf:ro
+      - ./icinga2-conf/features-enabled/influxdb.conf:/etc/icinga2/features-enabled/influxdb.conf:ro
+
+      # --- vigilancia de las copias (servicios "Backup - *" de
+      #     stack-monitoring.conf) ------------------------------------------
+      # Los dos origenes llegan SOLO LECTURA: Icinga mira, no toca. Sin
+      # ellos esos servicios no pueden funcionar, porque lo que hay que
+      # medir es el fichero mas reciente de una carpeta que vive fuera del
+      # contenedor (el destino de las copias y el volcado de mysql-dump).
+      # OJO: `mk-clean-test.ps1` reescribe C:/docker-backups a ./backups,
+      # asi que en la copia se vigila su propio destino, no este.
+      - C:/docker-backups:/backups:ro
+      - backup_staging:/staging:ro
+      # El plugin propio (backup/check-backups.sh) en PluginDir. Se lanza
+      # con /bin/sh desde el CheckCommand, porque el bit de ejecucion de un
+      # fichero montado desde Windows no esta garantizado.
+      - ./backup/check-backups.sh:/usr/lib/nagios/plugins/check-backups.sh:ro
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # Not strictly required (the writer just retries on connection errors),
+      # but it avoids a burst of "Connection refused" lines on the very first
+      # boot of a fresh volume.
+      influxdb:
+        condition: service_healthy
+    networks:
+      - icinga-net
+    restart: unless-stopped
+    healthcheck:
+      # On a fresh volume the entrypoint first runs `icinga2 api setup`
+      # (PKI generation + node setup) before the daemon starts.
+      test: ["CMD", "icinga2", "daemon", "-C"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+  icinga-web:
+    build:
+      context: ./web
+    image: icinga-stack-web:latest
+    container_name: icinga-web
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    environment:
+      ICINGA2_HOST: icinga2
+      ICINGA2_PORT: 5665
+      MYSQL_HOST: mariadb
+      MYSQL_DATABASE: icinga2
+      MYSQL_USER: icinga
+      MYSQL_PASSWORD: icinga_pass
+
+      # ---- global configuration ------------------------------------------
+      # Note: every .ini file that is mentioned here is rewritten from
+      # scratch on each start, so all keys of a file must be listed.
+      icingaweb.enabledModules: icingadb,director,incubator,doc,translation,audit
+
+      # ---- resources.ini --------------------------------------------------
+      icingaweb.resources.icingaweb_db.type: db
+      icingaweb.resources.icingaweb_db.db: mysql
+      icingaweb.resources.icingaweb_db.host: mariadb
+      icingaweb.resources.icingaweb_db.port: "3306"
+      icingaweb.resources.icingaweb_db.dbname: icinga2
+      icingaweb.resources.icingaweb_db.username: icinga
+      icingaweb.resources.icingaweb_db.password: icinga_pass
+      icingaweb.resources.icingaweb_db.charset: utf8mb4
+
+      icingaweb.resources.icingadb.type: db
+      icingaweb.resources.icingadb.db: mysql
+      icingaweb.resources.icingadb.host: mariadb
+      icingaweb.resources.icingadb.port: "3306"
+      icingaweb.resources.icingadb.dbname: icingadb
+      icingaweb.resources.icingadb.username: icinga
+      icingaweb.resources.icingadb.password: icinga_pass
+      icingaweb.resources.icingadb.charset: utf8mb4
+
+      icingaweb.resources.director_db.type: db
+      icingaweb.resources.director_db.db: mysql
+      icingaweb.resources.director_db.host: mariadb
+      icingaweb.resources.director_db.port: "3306"
+      icingaweb.resources.director_db.dbname: director
+      icingaweb.resources.director_db.username: icinga
+      icingaweb.resources.director_db.password: icinga_pass
+      icingaweb.resources.director_db.charset: utf8mb4
+
+      # ---- authentication.ini / passwords / roles -------------------------
+      icingaweb.authentication.icingaweb2.backend: db
+      icingaweb.authentication.icingaweb2.resource: icingaweb_db
+      icingaweb.passwords.icingaweb2.admin: icingaadmin123
+      icingaweb.roles.Administrators.users: admin
+      icingaweb.roles.Administrators.permissions: "*"
+
+      # ---- module icingadb (Icinga DB Web) --------------------------------
+      icingaweb.modules.icingadb.config.icingadb.resource: icingadb
+      icingaweb.modules.icingadb.config.redis.tls: "0"
+      icingaweb.modules.icingadb.redis.redis1.host: redis
+      icingaweb.modules.icingadb.redis.redis1.port: "6379"
+      icingaweb.modules.icingadb.redis.redis1.database: "0"
+      icingaweb.modules.icingadb.commandtransports.icinga2.transport: api
+      icingaweb.modules.icingadb.commandtransports.icinga2.host: icinga2
+      icingaweb.modules.icingadb.commandtransports.icinga2.port: "5665"
+      icingaweb.modules.icingadb.commandtransports.icinga2.username: icingaweb
+      icingaweb.modules.icingadb.commandtransports.icinga2.password: icingaweb123
+
+      # ---- module director -------------------------------------------------
+      icingaweb.modules.director.config.db.resource: director_db
+      icingaweb.modules.director.kickstart.config.endpoint: icinga2
+      icingaweb.modules.director.kickstart.config.host: icinga2
+      icingaweb.modules.director.kickstart.config.port: "5665"
+      icingaweb.modules.director.kickstart.config.username: icingaweb
+      icingaweb.modules.director.kickstart.config.password: icingaweb123
+    volumes:
+      - icinga_web_data:/data
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      icinga2:
+        condition: service_started
+      icingadb:
+        condition: service_started
+    networks:
+      - icinga-net
+    restart: unless-stopped
+    healthcheck:
+      # Apache only starts once the entrypoint has imported the Icinga Web
+      # schema into MySQL, so a fresh volume needs extra time here.
+      test: ["CMD", "pgrep", "apache2"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+
+  # One-shot: creates the Director schema, runs the kickstart (imports
+  # zones/endpoints/apiuser and the 250+ check commands) and deploys the
+  # generated config to Icinga 2. The stock icingaweb2 entrypoint does none
+  # of that, so without this service every `docker compose down -v` would
+  # require those three commands to be run by hand.
+  #
+  # Idempotent: on an already configured stack it reports "nothing to do" and
+  # exits. `docker compose up -d` starts it after icinga-web is healthy; its
+  # progress is visible with `docker compose logs -f director-init`.
+  director-init:
+    image: icinga-stack-web:latest
+    build:
+      context: ./web
+    container_name: icinga-director-init
+    # Override the image entrypoint (which writes the Icinga Web .ini files)
+    # - the icinga-web service already did that into the shared volume.
+    entrypoint: ["/bin/bash", "/director-bootstrap.sh"]
+    volumes:
+      - icinga_web_data:/data
+      - ./web/director-bootstrap.sh:/director-bootstrap.sh:ro
+    depends_on:
+      icinga-web:
+        condition: service_healthy
+      icinga2:
+        condition: service_healthy
+    networks:
+      - icinga-net
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # Copias de seguridad (Duplicati, interfaz web en http://localhost:8200)
+  # ---------------------------------------------------------------------------
+
+  # Vuelca MySQL en /staging/dump.sql cada 10 minutos. Duplicati respalda ese
+  # fichero en lugar del datadir de MariaDB: copiar /var/lib/mysql en caliente
+  # da una copia inconsistente que fallaria al restaurarse.
+  # Mas detalle en ./backup/mysql-dump.sh
+  mysql-dump:
+    image: mysql:8.0
+    container_name: icinga-mysql-dump
+    environment:
+      # El cliente `mysql` lo lee como MYSQL_PWD, asi no hay que poner -p en
+      # la linea de comando (que dejaria la contrasena en `ps`).
+      MYSQL_PWD: icinga_root
+    # El entrypoint de la imagen es docker-entrypoint.sh, que arrancaria
+    # mysqld. Se sustituye por nuestro bucle; el CMD `mysqld` de la imagen
+    # pasa a ser argumento y el script lo ignora.
+    entrypoint: ["/bin/sh", "/mysql-dump.sh"]
+    volumes:
+      - backup_staging:/staging
+      - ./backup/mysql-dump.sh:/mysql-dump.sh:ro
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    networks:
+      - icinga-net
+    restart: unless-stopped
+    healthcheck:
+      # dump.sql se escribe a un temporal y se renombra con `mv` (atomico)
+      # cada 10 min. Si tiene mas de 15 min es que el bucle esta roto, y no
+      # tiene sentido dejarse copiar algo obsoleto.
+      test: ["CMD-SHELL", "test -f /staging/dump.sql && find /staging/dump.sql -mmin -15 | grep -q ."]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      # `mysql-dump` solo arranca cuando mariadb ya esta healthy (depends_on),
+      # asi que aqui lo unico que hay que dar es margen a los primeros
+      # volcados: el bucle reintenta hasta que MariaDB acepta conexiones.
+      start_period: 300s
+
+  duplicati:
+    image: duplicati/duplicati:latest
+    container_name: icinga-duplicati
+    environment:
+      # Sin esta variable Duplicati genera una contrasena aleatoria en el
+      # primer arranque y deja de poder entrar (solo queda un enlace de uso
+      # unico en los logs).
+      DUPLICATI__WEBSERVICE_PASSWORD: icingaadmin123
+      DUPLICATI__WEBSERVICE_INTERFACE: any
+      # Duplicati rechaza con "Invalid hostname" los Host header que no esten
+      # en esta lista, lo que romperia dos cosas: el acceso via localhost:8200
+      # desde el navegador (bien) y la llamada de duplicati-init a
+      # http://duplicati:8200 desde dentro de la red del compose (403).
+      # Sin esto la copia nunca se daria de alta sola.
+      DUPLICATI__WEBSERVICE_ALLOWED_HOSTNAMES: "localhost;127.0.0.1;duplicati"
+      # Cifra la base de configuracion con una clave derivada del hardware;
+      # al estar siempre en este mismo contenedor solo añade el riesgo de
+      # perder el acceso si cambia la maquina. Explicito para silenciar el
+      # aviso de arranque.
+      DUPLICATI__DISABLE_DB_ENCRYPTION: "true"
+      # El planificador usa la hora local del contenedor: 03:00 UTC-3.
+      TZ: America/Argentina/Buenos_Aires
+    ports:
+      - "8200:8200"
+    volumes:
+      # Base de datos de Duplicati: que copias existen, historial, opciones.
+      - duplicati_config:/data
+      # Destino de las copias -> C:\docker-backups\icinga-stack\
+      #
+      # RUTA ABSONTA A PROPOSITO: es el recurso mas valioso del stack y no
+      # puede vivir en el mismo disco fisico que los datos. Hoy todo el peso
+      # (volumentes Docker en docker_data.vhdx, proyecto, copias) caia junto
+      # en D:, asi que un fallo de ese disco se llevaba datos Y copias.
+      #   D: (HDD 1 TB)  -> datos (docker_data.vhdx) + proyecto
+      #   C: (SSD 256 GB) -> destino de las copias  <- DISCO DISTINTO
+      # Asi: si muere D: los .zip siguen en C: y se restaura; si muere C:
+      # los datos siguen en D: y sigues funcionando.
+      # OJO: `mk-clean-test.ps1` reescribe esta ruta a ./backups en su copia,
+      # para que el clean-test no escriba en el destino de produccion.
+      - C:/docker-backups:/dest
+
+      # --- origenes: volumenes del stack ------------------------------------
+      # NO esta db_data: MySQL se copia via el volcado de mysql-dump.
+      # NO estan icinga2_cache ni icinga2_spool: son caches regenerables.
+      - backup_staging:/sources/volumes/mysql-dump:ro
+      - icinga2_data:/sources/volumes/icinga2-etc:ro
+      - icinga2_lib:/sources/volumes/icinga2-lib:ro
+      - icinga_web_data:/sources/volumes/icinga-web:ro
+      - redis_data:/sources/volumes/redis:ro
+      - influxdb_data:/sources/volumes/influxdb:ro
+      - grafana_data:/sources/volumes/grafana:ro
+      - mailpit_data:/sources/volumes/mailpit:ro
+
+      # --- origenes: ficheros del proyecto ----------------------------------
+      # Se monta entrada por entrada y NO el directorio ./ entero: asi
+      # ./backups (el destino) nunca queda dentro del origen y es imposible
+      # que una copia se respalde a si misma. Si se añade una entrada nueva
+      # al proyecto, anotarla aqui y en backup/icinga-stack-backup.json.
+      - ./backup:/sources/project/backup:ro
+      - ./docker-compose.yml:/sources/project/docker-compose.yml:ro
+      - ./grafana:/sources/project/grafana:ro
+      - ./icinga2-conf:/sources/project/icinga2-conf:ro
+      - ./mk-clean-test.ps1:/sources/project/mk-clean-test.ps1:ro
+      - ./mysql-init:/sources/project/mysql-init:ro
+      - ./README.md:/sources/project/README.md:ro
+      - ./verify.ps1:/sources/project/verify.ps1:ro
+      - ./web:/sources/project/web:ro
+    depends_on:
+      mysql-dump:
+        condition: service_healthy
+    networks:
+      - icinga-net
+    restart: unless-stopped
+    healthcheck:
+      # La imagen no trae wget pero si trae curl. `/` responde 200 sin
+      # autenticar; `/api/*` devuelve 401 y haria fallar el check.
+      test: ["CMD-SHELL", "curl -sf -o /dev/null http://localhost:8200/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # One-shot: da de alta EN Duplicati todos los JSON declarativos que haya en
+  # ./backup/*.json (uno por copia). Sin esto un `down -v` dejaria Duplicati
+  # vacio y habria que configurar las copias a mano desde la web.
+  # Idempotente: una copia que ya existe no se toca (mismo patron que
+  # director-init). Anadir una copia nueva = soltar su JSON en backup/ y
+  # relanzar `docker compose up -d duplicati-init`; este fichero no cambia.
+  # Progreso: `docker compose logs -f duplicati-init`.
+  duplicati-init:
+    image: duplicati/duplicati:latest
+    container_name: icinga-duplicati-init
+    entrypoint: ["/bin/sh", "/payloads/duplicati-bootstrap.sh"]
+    environment:
+      DUP_USER: admin
+      DUP_PASSWORD: icingaadmin123
+      PAYLOAD_DIR: /payloads
+      DUPLICATI_URL: http://duplicati:8200
+      # Montado mas abajo en solo lectura; se declara aqui para que la
+      # decision "el destino esta vacio" no dependa de un valor por defecto.
+      DEST_DIR: /dest
+    volumes:
+      - ./backup:/payloads:ro
+      # El destino, SOLO LECTURA y unico motivo: poder preguntar "ya hay
+      # algun .zip aqui?". Es la distincion que decide si hace falta lanzar
+      # la primera copia (ver el bloque "primera ejecucion" del script).
+      # OJO: `mk-clean-test.ps1` reescribe esta ruta igual que en `duplicati`.
+      - C:/docker-backups:/dest:ro
+    depends_on:
+      duplicati:
+        condition: service_healthy
+      mysql-dump:
+        condition: service_healthy
+    networks:
+      - icinga-net
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # project-mirror: copia en plano del proyecto al otro disco
+  # ---------------------------------------------------------------------------
+  # Espejo automatico de ./ en C:\docker-backups\project\. Ver backup/
+  # project-mirror.sh para el por que (rompe la circularidad "para leer la
+  # copia necesito el proyecto, y el proyecto esta en la copia").
+  # Patron identico al de mysql-dump: contenedor sin estado, bucle con
+  # intervalo, healthcheck sobre la fecha de la ultima sincronizacion.
+  project-mirror:
+    image: alpine:3.19
+    container_name: icinga-project-mirror
+    entrypoint: ["/bin/sh", "/mirror/project-mirror.sh"]
+    volumes:
+      # El directorio ./ entero, a diferencia de los origenes de Duplicati:
+      # aqui no hace falta repartirlo entrada por entrada porque el destino
+      # esta en OTRO disco y jamas puede quedar dentro del origen (ademas el
+      # script excluye tmp/, _clean-test/ y backups/).
+      - ./:/src:ro
+      - C:/docker-backups/project:/dest
+      - ./backup/project-mirror.sh:/mirror/project-mirror.sh:ro
+    networks:
+      - icinga-net
+    restart: unless-stopped
+    healthcheck:
+      # .last-sync se renueva en cada pase (cada 10 min); mas de 30 min sin
+      # renovar es que el bucle se ha caido.
+      test: ["CMD-SHELL", "find /dest/.last-sync -mmin -30 | grep -q ."]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+volumes:
+  db_data:
+  backup_staging:
+  duplicati_config:
+  icinga2_data:
+  mailpit_data:
+  influxdb_data:
+  grafana_data:
+  icinga2_lib:
+  icinga2_cache:
+  icinga2_spool:
+  icinga_web_data:
+  redis_data:
+
+networks:
+  # ---------------------------------------------------------------------------
+  # Red de monitorizacion - RECURSO TRANSVERSAL, no propiedad de este stack
+  # ---------------------------------------------------------------------------
+  # Nombre estable y declarada `external` para que otros stacks se le puedan
+  # unir sin que un `docker compose down` de este proyecto la borre: una red
+  # compartida comparte vida con quien la usa, no con quien la declaro. Se
+  # crea UNA sola vez, antes del primer `up -d`:
+  #
+  #     docker network create monitoring-net
+  #
+  # (Si falta, compose avisa con claridad: "declared as external, but could
+  #  not be found".)
+  #
+  # Otro proyecto se conecta sin tocar nada de este stack:
+  #
+  #     networks:
+  #       monitoring-net:
+  #         external: true
+  #         name: monitoring-net
+  #
+  # `mk-clean-test.ps1` elimina `external` y `name` en su copia, para que el
+  # clean-test tenga su propia red en vez de colgarse de la de produccion.
+  icinga-net:
+    external: true
+    name: monitoring-net

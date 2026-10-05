@@ -1,0 +1,18 @@
+apiVersion: 1
+
+# Provisioned data source, so a fresh Grafana volume comes up already wired
+# to InfluxDB without clicking through the UI. The `uid` is referenced by
+# every panel in ../dashboards/icinga-stack.json.
+datasources:
+  - name: InfluxDB
+    uid: icinga-influx
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    database: icinga2
+    isDefault: true
+    editable: true
+    jsonData:
+      # InfluxDB 1.x HTTP API - `GET /query` (the default for this type).
+      httpMode: GET
+      timeInterval: "10s"

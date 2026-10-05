@@ -1,0 +1,40 @@
+# ============================================================================
+#  Lo que NUNCA entra en el repositorio
+# ============================================================================
+#
+#  Criterio: se versiona declaracion, no resultado. Todo lo que se puede
+#  regenerar con un script del propio proyecto aqui no va.
+
+# --- generado por el proyecto ----------------------------------------------
+
+# Copia de pruebas que crea mk-clean-test.ps1. Se regenera entera con `mk`
+# y se borra tras cada clean-test: versionarla solo genera ruido y ademas
+# invita a levantar un clean-test desactualizado.
+_clean-test/
+
+# Destino de las copias. En produccion es C:\docker-backups y en el
+# clean-test un ./backups relativo dentro de _clean-test; nunca esta aqui,
+# pero se ignora por si el rewrite fallara en algun dia.
+backups/
+
+# Zona de pruebas: volcados, restos de depuracion, logs de iteracion.
+tmp/
+
+# --- artefactos de herramientas ---------------------------------------------
+*.tar
+*.zip
+*.dlist
+*.aegis
+*.log
+
+# --- ruido de Windows y editores -------------------------------------------
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+
+# NO ignorar *.sql: los de mysql-init/ son fuente y hacen falta para que el
+# stack se levante desde cero.
