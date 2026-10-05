@@ -1056,6 +1056,62 @@
       ],
       "title": "Copias — ultima ejecucion del programador",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Segundos desde la ultima vez que Icinga DB latio en icingadb_instance.heartbeat. El daemon no publica ningun puerto (6666, 8080, 8086, 9090 y 9981, sondeados desde monitoring-net: los cinco cerrados) y su imagen es distroless: sin sh, sin curl, sin wget, y su binario solo ofrece --version, -c y --database-auto-import. Por eso no admite healthcheck, y hasta que existio el servicio 'Icinga DB - Heartbeat' un ping era todo lo que lo vigilaba - alcanza para ver el contenedor caido, pero es ciego ante un daemon colgado, que es justo el fallo que dejaria Icinga Web sirviendo datos viejos con todo lo demas en verde. El latido se renueva solo cada ~70 s. Umbrales de Icinga: aviso a los 180 s (tres latidos perdidos) y critico a los 600 s; el color de la linea los sigue.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 180 },
+              { "color": "red", "value": 600 }
+            ]
+          },
+          "unit": "s",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
+      "id": 19,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") AS \"segundos\" FROM \"mysql_query\" WHERE \"service\" = 'Icinga DB - Heartbeat' AND \"hostname\" =~ /^$host$/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Icinga DB — edad del ultimo latido (s) (warn 180 / crit 600)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

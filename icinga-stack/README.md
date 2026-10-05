@@ -262,11 +262,12 @@ data* a InfluxDB 1.8, y **Grafana** que lo dibuja:
 ```
 
 El dashboard **«Icinga Stack — métricas de los servicios»** (carpeta *Icinga*)
-es la página de inicio de Grafana. Trae 18 paneles: carga por núcleo con los
+es la página de inicio de Grafana. Trae 19 paneles: carga por núcleo con los
 umbrales 1,5/3,0, estado de hosts y servicios, RTT y pérdida de paquetes por
 host, HTTP/TCP, disco, swap, procesos, latencia y duración de checks de
-Icinga 2, tráfico del API y MySQL (consultas/s, conexiones, hilos), más una
-fila de **copias**: antigüedad de la última copia, frescura del volcado y del
+Icinga 2, tráfico del API y MySQL (consultas/s, conexiones, hilos), la edad
+del último latido de **Icinga DB** (su fila propia, en `y=48`), más una fila
+de **copias**: antigüedad de la última copia, frescura del volcado y del
 espejo, espacio libre en el destino y última ejecución del programador. El
 filtro **Host** del encabezado aplica a todos los paneles.
 
@@ -944,7 +945,7 @@ web/
 grafana/
   provisioning/datasources/        datasource InfluxDB (uid icinga-influx)
   provisioning/dashboards/         donde se mira para cargar dashboards
-  dashboards/icinga-stack.json     el dashboard provisionado (18 paneles)
+  dashboards/icinga-stack.json     el dashboard provisionado (19 paneles)
 
 tmp/                               sondas y benchmarks descartables
 ```

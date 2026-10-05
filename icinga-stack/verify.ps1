@@ -199,6 +199,16 @@ try {
 
   $db = Invoke-WebRequest "$graf/api/search?type=dash-db" -Headers $ga -UseBasicParsing -TimeoutSec 30
   Check "Grafana: dashboard provisionado" ($db.Content -match '"uid":"icinga-stack"') $db.Content
+
+  # El dashboard trae 19 paneles. Se comprueba por id el de Icinga DB, no
+  # solo el recuento: con un panel menos y otro de mas el recuento seguira
+  # cuadrando. Se lee de la API (lo que Grafana sirve), no del JSON.
+  $dbf = Invoke-WebRequest "$graf/api/dashboards/uid/icinga-stack" -Headers $ga -UseBasicParsing -TimeoutSec 30
+  $dp  = @(($dbf.Content | ConvertFrom-Json).dashboard.panels)
+  $hbp = @($dp | Where-Object { $_.id -eq 19 -and $_.title -like "*Icinga DB*" })
+  Check "Grafana: 19 paneles y el de Icinga DB presente" `
+        ($dp.Count -ge 19 -and $hbp.Count -eq 1) `
+        "$($dp.Count) paneles; panel 19 de Icinga DB: $($hbp.Count)"
 } catch { Check "Grafana" $false $_.Exception.Message }
 
 # --- 6. Copias de seguridad -------------------------------------------------
