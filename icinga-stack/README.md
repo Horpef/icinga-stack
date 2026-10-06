@@ -907,6 +907,10 @@ stack y de `C:\docker-backups`. Con varios proyectos conviene mover el
 destino a algo compartido (NAS, disco externo) y dejar aquí solo lo que es
 propiamente de este stack.
 
+> Ese plan, con sus fases 2-4 y su criterio de hecho, está escrito en
+> [`roadmap.md`](roadmap.md) — no en la conversación, que es donde se
+> perdía.
+
 ## Estructura
 
 ```
@@ -914,6 +918,8 @@ docker-compose.yml                 11 servicios + los 2 one-shot
                                     (director-init, duplicati-init)
                                     red externa `monitoring-net`
 README.md                          este archivo
+roadmap.md                         fases 2-4: cuando toque crecer, con que
+                                    criterio de hecho y que hay que ampliar
 verify.ps1                         comprobacion end-to-end
 mk-clean-test.ps1                  genera el proyecto aislado _clean-test/
 safety-net.ps1                     volcado plano de los 12 volumenes a .tar

@@ -18,10 +18,12 @@ New-Item -ItemType Directory -Path $dst | Out-Null
 # Every path that compose bind-mounts into Duplicati has to be copied, or
 # Docker would create an empty *directory* with that name in the copy and the
 # backup sources would silently break (see the ./mounts list in compose).
-# Ojo con safety-net.ps1: es un fichero montado uno a uno, asi que si falta
-# aqui el clean-test montaria un directorio vacio en su lugar.
+# Ojo con los ficheros de primer nivel montados uno a uno (safety-net.ps1,
+# roadmap.md): si faltan aqui, Docker crea en su lugar un directorio vacio
+# y el origen deja de ser el fichero que el JSON declara.
 foreach ($item in 'docker-compose.yml', 'mysql-init', 'icinga2-conf', 'web', 'grafana',
-                  'backup', 'README.md', 'safety-net.ps1', 'verify.ps1', 'mk-clean-test.ps1') {
+                  'backup', 'README.md', 'roadmap.md', 'safety-net.ps1', 'verify.ps1',
+                  'mk-clean-test.ps1') {
     Copy-Item -Recurse -Force (Join-Path $src $item) (Join-Path $dst $item)
 }
 

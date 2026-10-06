@@ -522,6 +522,7 @@ services:
       - ./mk-clean-test.ps1:/sources/project/mk-clean-test.ps1:ro
       - ./mysql-init:/sources/project/mysql-init:ro
       - ./README.md:/sources/project/README.md:ro
+      - ./roadmap.md:/sources/project/roadmap.md:ro
       - ./safety-net.ps1:/sources/project/safety-net.ps1:ro
       - ./verify.ps1:/sources/project/verify.ps1:ro
       - ./web:/sources/project/web:ro

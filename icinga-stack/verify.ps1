@@ -295,7 +295,7 @@ try {
         $src = @($d.Backup.Sources)
         $set = @($d.Backup.Settings | ForEach-Object { "$($_.Name)=$($_.Value)" })
 
-        Check "Duplicati: 18 origenes (volcado + volumenes + proyecto)" ($src.Count -ge 18) $src.Count
+        Check "Duplicati: 19 origenes (volcado + volumenes + proyecto)" ($src.Count -ge 19) $src.Count
         Check "Duplicati: el volcado de MySQL es origen" `
               ($src -contains "/sources/volumes/mysql-dump") ($src -join ", ")
         Check "Duplicati: safety-net.ps1 es origen (la red de seguridad se copia)" `
