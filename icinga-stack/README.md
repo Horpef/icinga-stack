@@ -87,16 +87,22 @@ Enlaces:
 
 ## Qué monitoriza
 
-La definición vive en `icinga2-conf/conf.d/stack-monitoring.conf`:
+La definición vive en `icinga2-conf/conf.d/stack-monitoring.conf` (los seis
+hosts del propio stack) y en `icinga2-conf/conf.d/wazuh.conf` (los tres del
+stack ajeno de la Fase 2):
 
-* **6 hosts**: `icinga2`, `icinga-web`, `icingadb`, `mariadb`, `redis`, `mailpit`
-* **32 servicios**: ping/TCP de cada servicio, HTTP y HTTPS de la web
+* **9 hosts**: `icinga2`, `icinga-web`, `icingadb`, `mariadb`, `redis`,
+  `mailpit` y, viniendo de otro proyecto, `wazuh-manager`, `wazuh-indexer` y
+  `wazuh-dashboard`
+* **40 servicios**: ping/TCP de cada servicio, HTTP y HTTPS de la web
   (esperan 302, que es lo que devuelve el login), API de Icinga 2 (200 con
   auth), UI de Mailpit, conexión/uptime/uso de MySQL, disco, carga, procesos…,
-  el **heartbeat de Icinga DB** (ver la sección propia) y los **5
-  `Backup - *`** descritos más abajo.
-* **8 hostgroups**: `stack-database`, `stack-cache`, `stack-monitoring`,
-  `stack-web`, `stack-mail`, `stack-all`…
+  el **heartbeat de Icinga DB** (ver la sección propia), los **5
+  `Backup - *`** descritos más abajo, y los **8 de Wazuh**: API en 55000
+  (espera 401, que es la respuesta sana), TCP 1514 y 1515, salud del clúster
+  del indexer (200 **y** cuerpo `green`) y página de acceso del panel (302).
+* **9 hostgroups**: `stack-database`, `stack-cache`, `stack-monitoring`,
+  `stack-web`, `stack-mail`, `stack-wazuh`, `stack-all`…
 
 Cualquier servicio en fallo dispara una notificación por correo a los
 miembros de `icingaadmins`, que aterriza en Mailpit.
@@ -262,7 +268,7 @@ data* a InfluxDB 1.8, y **Grafana** que lo dibuja:
 ```
 
 El dashboard **«Icinga Stack — métricas de los servicios»** (carpeta *Icinga*)
-es la página de inicio de Grafana. Trae 19 paneles: carga por núcleo con los
+es la página de inicio de Grafana. Trae 22 paneles: carga por núcleo con los
 umbrales 1,5/3,0, estado de hosts y servicios, RTT y pérdida de paquetes por
 host, HTTP/TCP, disco, swap, procesos, latencia y duración de checks de
 Icinga 2, tráfico del API y MySQL (consultas/s, conexiones, hilos), la edad
@@ -270,6 +276,12 @@ del último latido de **Icinga DB** (su fila propia, en `y=48`), más una fila
 de **copias**: antigüedad de la última copia, frescura del volcado y del
 espejo, espacio libre en el destino y última ejecución del programador. El
 filtro **Host** del encabezado aplica a todos los paneles.
+
+La fila de abajo del todo (ids 20-22, `y=56`) es la del **stack de Wazuh**:
+respuesta HTTP de sus tres contenedores, tiempo de conexión a los puertos de
+agentes (1514/1515) y ping de los tres. Van con filtro propio
+`hostname =~ /wazuh/` y **no** con `$host`: son su panel y tienen que seguir
+viéndose cuando el filtro Host esté puesto en otro stack.
 
 ### Esquema en InfluxDB (ojo, no es el evidente)
 
@@ -443,12 +455,14 @@ pararlos dispararía alertas `CRITICAL` falsas a las 3 de la mañana.
 
 ### Probar que funciona de verdad
 
-`verify.ps1` hace **32 comprobaciones de copias** (53 en total), incluida una
+`verify.ps1` hace **38 comprobaciones de copias** (66 en total), incluida una
 **restauración** que compara el SHA256 de `README.md` y de `safety-net.ps1`
-recuperados con el original, más el espejo del proyecto y la red de seguridad:
+recuperados con el original, **otra restauración de la copia de Wazuh** que
+hace lo mismo con su `docker-compose.yml` y su `wazuh.yml`, más el espejo del
+proyecto y la red de seguridad:
 
 ```powershell
-.\verify.ps1            # 53 checks, TOTAL FALLOS: 0
+.\verify.ps1            # 66 checks, TOTAL FALLOS: 0
 ```
 
 A mano:
@@ -476,7 +490,7 @@ inspeccionar el historial y probar la restauración con
 > Este procedimiento se ejecutó de verdad sobre producción el 4-oct-2026:
 > `docker compose down -v`, levantamiento limpio y restauración completa.
 > Resultado: **`verify.ps1` → TOTAL FALLOS: 0**. (El recuento de checks
-> crece con el tiempo — eran 44 en esa primera ejecución; hoy son 53.)
+> crece con el tiempo — eran 44 en esa primera ejecución; hoy son 66.)
 
 **Qué borra y qué sobrevive** a un `docker compose down -v`:
 
@@ -501,7 +515,7 @@ docker compose up -d
 
 | Qué | Origen | Resultado |
 |---|---|---|
-| Hosts, servicios, Director, Icinga Web | *se reconstruyen solos* | 6 hosts / 32 servicios sin restaurar nada |
+| Hosts, servicios, Director, Icinga Web | *se reconstruyen solos* | 9 hosts / 40 servicios sin restaurar nada |
 | `README.md` (y todo el proyecto) | Duplicati | SHA256 idéntico al original |
 | Histórico de métricas | Duplicati → `influxdb_data` | 21 ficheros; `ping4` 51 → **2050** puntos |
 | Histórico de MySQL | Duplicati → `dump.sql` | notificaciones 0 → **58**, grants intactos |
@@ -700,17 +714,19 @@ de núcleos, de modo que los umbrales de `hosts.conf` se leen **por núcleo**
 ## Verificación
 
 `verify.ps1` comprueba todo de una pasada y devuelve el número de fallos
-(login con credenciales reales, 6 hosts / 32 servicios en OK — incluidos los
-cinco `Backup - *` —, los cuatro test del Director, una notificación que
-tiene que acabar en Mailpit, que InfluxDB esté recibiendo métricas y Grafana
-tenga el datasource y el dashboard provisionados, y **32 comprobaciones de
-copias de seguridad** — volcado, alta declarativa, historial de Duplicati,
-lanzar una copia real, restaurar tres ficheros para compararlos, el espejo del
+(login con credenciales reales, 9 hosts / 40 servicios en OK — incluidos los
+cinco `Backup - *` y los ocho de Wazuh —, los cuatro test del Director, dos
+notificaciones que tienen que acabar en Mailpit — una de `mariadb` y otra de
+un servicio de Wazuh —, que InfluxDB esté recibiendo métricas y Grafana tenga
+el datasource, el dashboard y los tres paneles de Wazuh provisionados, y **38
+comprobaciones de copias de seguridad** — volcado, alta declarativa,
+historial de Duplicati, lanzar una copia real, restaurar tres ficheros para
+compararlos, restaurar la copia de Wazuh y comparar los suyos, el espejo del
 proyecto y la red de seguridad):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\verify.ps1              # 53 checks
-powershell -ExecutionPolicy Bypass -File .\verify.ps1 -CleanTest   # 50 checks
+powershell -ExecutionPolicy Bypass -File .\verify.ps1              # 66 checks
+powershell -ExecutionPolicy Bypass -File .\verify.ps1 -CleanTest   # 63 checks
 # ===== TOTAL FALLOS: 0 =====
 ```
 
@@ -829,8 +845,16 @@ En cuanto el host existe, **las alertas por correo llegan solas** (el grupo
 `icingaadmins` ya está configurado) y las métricas del check van a InfluxDB.
 Lo único manual es añadir los paneles nuevos al dashboard de Grafana.
 
-`verify.ps1` no se entera: comprueba `>= 6 hosts` y `>= 30 servicios`, o sea
-**mínimos**, no valores exactos.
+Esto no es teórico: la Fase 2 lo aplicó al stack de Wazuh y el resultado está
+versionado en `icinga2-conf/conf.d/wazuh.conf` (tres hosts y cinco servicios,
+con `address` apuntando a `wazuh.manager` / `wazuh.indexer` /
+`wazuh.dashboard`, que son los nombres que llevan los certificados TLS del
+otro proyecto) y en los paneles 20-22 del dashboard.
+
+`verify.ps1` no se entera: comprueba `>= 9 hosts` y `>= 40 servicios`, o sea
+**mínimos**, no valores exactos. Además mira **por nombre** los tres hosts y
+los cinco servicios de Wazuh, porque solo con el recuento bastaría con que
+desapareciera uno y entrara otro distinto.
 
 ### 2. Copias
 
@@ -938,13 +962,17 @@ backup/                            copias de seguridad (Duplicati)
                                    "Backup - *" (ver "Las copias, vigiladas
                                    en continuo")
   icinga-stack-backup.json         la copia de este stack (fuentes, retencion, plan)
-  <otro-stack>.json                aqui iria la copia de otro stack
-                                    (ver "Anadir otro stack")
+  wazuh-stack-backup.json          la copia del otro stack (Fase 2): su compose,
+                                   sus certificados TLS y su configuracion
 
 C:\docker-backups\                 DESTINO (OTRO DISCO FISICO, en C:)
   icinga-stack/                    dlist / dblock / dindex .zip  (Duplicati)
+  wazuh-stack/                     lo mismo para el stack de Wazuh (Fase 2)
   project/                         espejo legible del proyecto (project-mirror)
-  safety-net/                      12 .tar crudos + el catalogo de Duplicati
+  safety-net/                      12 .tar crudos + el catalogo de Duplicati.
+                                   SOLO los volumenes de este stack: ampliarlo
+                                   a los 14 de Wazuh esta en la Fase 4 (ver
+                                   roadmap.md), no se ha adelantado.
 
 mysql-init/                        solo en el primer arranque de un volumen
   00-mysql-settings.sql            log_bin_trust_function_creators
@@ -954,7 +982,14 @@ mysql-init/                        solo en el primer arranque de un volumen
 icinga2-conf/                      montado en /etc/icinga2 (read-only)
   conf.d/hosts.conf                objeto Host NodeName + umbrales de carga
   conf.d/api-users.conf            ApiUser `icingaweb` con permisos "*"
-  conf.d/stack-monitoring.conf     los 6 hosts, 8 hostgroups, 32 servicios
+  conf.d/stack-monitoring.conf     los 6 hosts y 32 servicios del propio stack,
+                                   8 hostgroups (stack-all ya incluye el rol
+                                   wazuh)
+  conf.d/wazuh.conf                Fase 2: los 3 hosts y 5 servicios del stack
+                                   de Wazuh + hostgroup stack-wazuh. Montado
+                                   con su propia linea en el compose: conf.d
+                                   se monta fichero a fichero, un .conf nuevo
+                                   sin montaje no aparece en el contenedor.
   features-enabled/icingadb.conf   Icinga 2 -> Redis
   features-enabled/ido-mysql.conf  Icinga 2 -> MySQL `icinga2`
   features-enabled/influxdb.conf   Icinga 2 -> InfluxDB (perfdata)
@@ -967,7 +1002,8 @@ web/
 grafana/
   provisioning/datasources/        datasource InfluxDB (uid icinga-influx)
   provisioning/dashboards/         donde se mira para cargar dashboards
-  dashboards/icinga-stack.json     el dashboard provisionado (19 paneles)
+  dashboards/icinga-stack.json     el dashboard provisionado (22 paneles, los 3
+                                   ultimos del stack de Wazuh)
 
 tmp/                               sondas y benchmarks descartables
 ```

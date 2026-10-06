@@ -1,0 +1,24 @@
+{
+  "Backup": {
+    "Name": "wazuh-stack",
+    "Description": "Copia del stack de Wazuh 4.14.8 (Fase 2): compose, certificados TLS, configuracion de manager/indexer/dashboard y el script que regenera el certificado del panel. El origen son los cuatro elementos del otro proyecto, montados ENTRADA POR ENTRADA en el servicio duplicati; si ese proyecto gana un fichero de primer nivel, hay que anadirlo a las dos mitades (compose + este JSON) o no se copia. NO incluye los 14 volumenes Docker (docker_data.vhdx): son datos vivos del indexer y se recuperan reinstalando el stack. Si un dia hace falta conservar el indice de alertas, se anade su volumen montado entrada por entrada, igual que hace la copia de icinga-stack.",
+    "TargetURL": "file:///dest/wazuh-stack",
+    "Sources": [
+      "/sources/otros/wazuh-stack/docker-compose.yml",
+      "/sources/otros/wazuh-stack/config",
+      "/sources/otros/wazuh-stack/generate-indexer-certs.yml",
+      "/sources/otros/wazuh-stack/regen-dashboard-cert.sh"
+    ],
+    "Settings": [
+      { "Name": "--no-encryption", "Value": "true" },
+      { "Name": "retention-policy", "Value": "14D:0s,8W:7D,1Y:30D" },
+      { "Name": "log-retention", "Value": "30D" }
+    ],
+    "Filters": []
+  },
+  "Schedule": {
+    "Time": "2026-10-05T04:00:00",
+    "Repeat": "1D",
+    "AllowedDays": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+  }
+}

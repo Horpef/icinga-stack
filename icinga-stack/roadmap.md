@@ -10,8 +10,9 @@ Cada fase tiene un **criterio de hecho**, que es lo único que la distingue de
 hace falta, no antes: la tentación de adelantar trabajo que nadie ha pedido
 es la forma más común de estancarse.
 
-**Estado: Fase 1 completa.** Fases 2-4 esperan a que haya algo que monitorizar
-y a que el crecimiento lo justifique.
+**Estado: Fases 1 y 2 completas.** La 3 (romper cosas a propósito para
+calibrar umbrales y tiempos) es la siguiente; la 4 espera a que el crecimiento
+la justifique.
 
 ---
 
@@ -34,22 +35,51 @@ verificable, y que vigile también sus propias copias.
 - **Criterio de hecho alcanzado**: `verify.ps1` → 53 checks, TOTAL FALLOS: 0,
   exit 0, en producción y en clean-test
 
-## Fase 2 · El primer stack real
+## Fase 2 · El primer stack real ✅
 
-**Cuándo**: en cuanto haya un segundo stack que quieras vigilar de verdad.
+**Hecho.** Vigilar un stack que no sea el propio, de punta a punta, y que
+quede declarativo y verificable como todo lo demás.
 
-Hoy el stack se vigila a sí mismo: los 6 hosts y los 32 servicios son del
-propio proyecto. El salto es monitorizar algo que no lo sea, y el gancho ya
-está construido — `monitoring-net` es `external: true` con nombre estable, así
-que cualquier stack nuevo solo tiene que colgarse de esa red.
+El stack elegido es **Wazuh 4.14.8** (`D:\docker\wazuh-stack`), que se cuelga
+de `monitoring-net` — que era exactamente el gancho que ya estaba construido.
+Se dio de alta por `conf.d` (el otro camino que documenta el README, vía
+Director, no hizo falta: los `.conf` montados fichero a fichero conviven con
+Director, como ya hacían `hosts.conf` y `stack-monitoring.conf`, y su health
+sigue en *everything is fine*).
 
-| Qué toca | Cómo |
-|---|---|
-| Nuevo `Host` + `apply Service` | en `conf.d/`, siguiendo el patrón de `stack-monitoring.conf` |
-| Darlo de alta | Director → *deploy* (los cuatro test del Director ya funcionan) |
-| Notificaciones | ya llegan a Mailpit, sin tocar nada |
-| Panel en Grafana | la variable `$host` del dashboard ya existe; solo añadir panel |
-| Copias | `duplicati-init` ya acepta un JSON por stack en `backup/` |
+| Qué toca | Cómo | Estado |
+|---|---|---|
+| Nuevo `Host` + `apply Service` | `icinga2-conf/conf.d/wazuh.conf`: 3 hosts, 5 servicios, 1 hostgroup | ✅ |
+| Darlo de alta | su línea de montaje en el compose + `icinga2 daemon -C` **antes** de recrear | ✅ |
+| Notificaciones | sin tocar nada: 49 objetos, los de Wazuh incluidos | ✅ |
+| Panel en Grafana | ids 20-22, con filtro propio `hostname =~ /wazuh/` | ✅ |
+| Copias | `backup/wazuh-stack-backup.json` + sus 4 montajes + alta idempotente | ✅ |
+
+**Criterio de hecho cumplido** — y comprobado, no deducido:
+
+- **Aparece en Icinga**: 9 hosts y 40 servicios en OK. Los 8 nuevos son API
+  del manager esperando **401** (que es la respuesta sana: el daemon contesta
+  y rechaza anónimos), TCP 1514 y 1515 por separado, `green` del clúster del
+  indexer (200 **y** cuerpo) y **302** del panel, más sus tres `ping4`.
+- **Dispara una notificación que acaba en Mailpit**: `send-custom-notification`
+  contra `wazuh-manager!Wazuh Manager - API (HTTPS)` → 200 y el mensaje llega.
+  Es el chequeo `4b` de `verify.ps1`; el chequeo antiguo mandaba uno contra
+  `mariadb`, que es del propio stack, y no bastaba para esto.
+- **Tiene su panel en Grafana**: los tres de la fila `y=56`, con consulta
+  propia para que sigan viéndose cuando el filtro Host esté en otro stack, y
+  los tres hosts apareciendo ya en ese filtro (sale de la etiqueta
+  `hostname` de `hostalive`).
+- **Copia real**: 4 orígenes, primera ejecución `Success` con 0 errores y 0
+  avisos, y restauración comprobada **bit a bit** con SHA256 idéntico
+  (`verify.ps1`, chequeos `6.6b` y `6.7b`).
+
+**Lo que NO se hizo, deliberadamente**: ampliar `safety-net.ps1` a los 14
+volúmenes de Wazuh y el plugin de copias a los stacks nuevos. Está en la Fase 4
+y así se respetó — la tentación de adelantar trabajo que nadie ha pedido es la
+forma más común de estancarse, y aquí no lo había. Mientras tanto, los
+volúmenes de Wazuh se reconstruyen reinstalando el stack **desde su
+configuración, que sí está copiada**; no hace falta la red de seguridad para
+eso.
 
 **Criterio de hecho**: un stack ajeno aparece en Icinga, dispara una
 notificación que acaba en Mailpit, y tiene su panel en Grafana.

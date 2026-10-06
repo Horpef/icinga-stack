@@ -79,10 +79,10 @@ try {
   $jh = "$env:TEMP\verify_hosts.json"; $js = "$env:TEMP\verify_svc.json"
   curl.exe -sk -u "icingaweb:icingaweb123" -H "Accept: application/json" "$api/v1/objects/hosts" -o $jh | Out-Null
   $hosts = @((Get-Content $jh -Raw | ConvertFrom-Json).results)
-  Check "API: >= 6 hosts" ($hosts.Count -ge 6) $hosts.Count
+  Check "API: >= 9 hosts" ($hosts.Count -ge 9) $hosts.Count
   curl.exe -sk -u "icingaweb:icingaweb123" -H "Accept: application/json" "$api/v1/objects/services" -o $js | Out-Null
   $services = @((Get-Content $js -Raw | ConvertFrom-Json).results)
-  Check "API: >= 31 servicios" ($services.Count -ge 31) $services.Count
+  Check "API: >= 40 servicios" ($services.Count -ge 40) $services.Count
 
   # Los cinco servicios que vigilan las copias (seccion 6 y
   # icinga2-conf/conf.d/stack-monitoring.conf). Se comprueban por nombre y
@@ -107,6 +107,31 @@ try {
   # Tambien por nombre: el recuento cuadraria aunque desapareciera.
   $hb = @($services | Where-Object { $_.attrs.__name -eq 'icingadb!Icinga DB - Heartbeat' })
   Check "API: servicio 'Icinga DB - Heartbeat' presente" ($hb.Count -eq 1) "$($hb.Count) encontrado(s)"
+
+  # Los tres hosts y los cinco servicios del stack ajeno (Fase 2). Por
+  # nombre, no solo por recuento: con mas hosts y servicios el recuento
+  # seguiria cuadrando aunque desapareciera el indexer entero y entrara
+  # otro servicio en su lugar. Mismo criterio que los "Backup - *".
+  $wzEsperados = @('wazuh-dashboard', 'wazuh-indexer', 'wazuh-manager')
+  $wzHay = @($hosts | ForEach-Object { $_.attrs.__name })
+  $wzFaltan = @($wzEsperados | Where-Object { $_ -notin $wzHay })
+  Check "API: 3 hosts del stack Wazuh dados de alta" `
+        ($wzFaltan.Count -eq 0) `
+        $(if ($wzFaltan.Count -eq 0) { 'wazuh-dashboard, wazuh-indexer, wazuh-manager' }
+          else { "faltan: $($wzFaltan -join ', ')" })
+
+  $wzServicios = @(
+    'wazuh-manager!Wazuh Manager - API (HTTPS)',
+    'wazuh-manager!Wazuh Manager - Agentes',
+    'wazuh-manager!Wazuh Manager - Alta de agentes',
+    'wazuh-indexer!Wazuh Indexer - Salud del cluster',
+    'wazuh-dashboard!Wazuh Dashboard - Pagina de acceso'
+  )
+  $wzFS = @($wzServicios | Where-Object { $_ -notin $hay })
+  Check "API: 5 servicios del stack Wazuh (API, agentes, alta, cluster, panel)" `
+        ($wzFS.Count -eq 0) `
+        $(if ($wzFS.Count -eq 0) { 'los 5 presentes' }
+          else { "faltan: $($wzFS -join ', ')" })
 
   $bad = @($services | Where-Object { $_.attrs.state -ne 0 })
 
@@ -163,6 +188,37 @@ try {
   }
 } catch { Check "Notificacion/Mailpit" $false $_.Exception.Message }
 
+# 4b. El mismo camino, pero sobre un objeto del stack AJENO. Es literalmente
+# el criterio de hecho de la Fase 2 ("dispara una notificacion que acaba en
+# Mailpit"): el bloque de arriba manda un aviso contra mariadb, que es del
+# propio stack de monitorizacion, y eso probaria la cadena de correo pero no
+# que las reglas de notificacion casen con los hosts nuevos. Aqui se manda un
+# aviso custom contra un servicio de wazuh-manager y se espera verlo llegar.
+try {
+  $mzw = "$env:TEMP\verify_mail_wazuh.json"
+  curl.exe -s "$mail/api/v1/messages" -o $mzw | Out-Null
+  $bzw = (Get-Content $mzw -Raw | ConvertFrom-Json).total
+
+  $pzw = '{"service":"wazuh-manager!Wazuh Manager - API (HTTPS)","type":"PROBLEM","severity":"CRITICAL",' +
+         '"author":"verify","comment":"Verificacion Fase 2 ' + $tag + '",' +
+         '"text":"Notificacion del stack Wazuh ' + $tag + '","force":true}'
+  $pjz = "$env:TEMP\verify_payload_wazuh.json"
+  [System.IO.File]::WriteAllText($pjz, $pzw, (New-Object System.Text.UTF8Encoding($false)))
+  $rz = curl.exe -sk -u "icingaweb:icingaweb123" -H "Content-Type: application/json" -H "Accept: application/json" `
+        -X POST "$api/v1/actions/send-custom-notification" --data-binary "@$pjz"
+  Check "API: notificacion custom sobre un servicio de Wazuh aceptada" `
+        ((@($rz) -join " ") -match '"code":\s*200') (@($rz) -join " ")
+
+  Start-Sleep -Seconds 15
+  curl.exe -s "$mail/api/v1/messages" -o $mzw | Out-Null
+  $azw = (Get-Content $mzw -Raw | ConvertFrom-Json).total
+  Check "Mailpit: mensaje nuevo del stack Wazuh ($bzw -> $azw)" ($azw -gt $bzw) "$bzw -> $azw"
+  if ($azw -gt $bzw) {
+    $szw = @(Get-Content $mzw -Raw | ConvertFrom-Json).messages[0].Subject
+    Check "Mailpit: el aviso menciona el servicio de Wazuh" ($szw -match "Wazuh") $szw
+  }
+} catch { Check "Notificacion Wazuh/Mailpit" $false $_.Exception.Message }
+
 # --- 5. InfluxDB + Grafana ---------------------------------------------------
 # El performance data de cada check viaja Icinga 2 -> InfluxdbWriter ->
 # InfluxDB, y Grafana lo grafica. Sin esto los paneles salen vacios.
@@ -187,6 +243,18 @@ try {
     if ($series.Count -gt 0) { $n = [int]$series[0].values[0][1] }
   } catch { $n = 0 }
   Check "InfluxDB: puntos nuevos en los ultimos 5 min" ($n -gt 0) "$n puntos :: $($fj.Substring(0,[Math]::Min(160,$fj.Length)))"
+
+  # La variable $host del dashboard se alimenta EXCLUSIVAMENTE de esta
+  # etiqueta ("SHOW TAG VALUES FROM hostalive WITH KEY = hostname"): si un
+  # host dejara de emitir ping4 desapareceria del desplegable aunque el
+  # dashboard siguiera montado y los paneles respondieran. Se comprueba
+  # sobre el stack ajeno, que es lo que se acaba de dar de alta.
+  $tq = 'SHOW TAG VALUES FROM "hostalive" WITH KEY = "hostname"'
+  $tj = @(docker exec $cInflux influx -database icinga2 -execute $tq 2>&1) -join "`n"
+  $ts = ($tj -replace "`r?`n", " ")
+  Check "InfluxDB: los 3 hosts de Wazuh salen en la variable Host de Grafana" `
+        (($tj -match 'wazuh-manager') -and ($tj -match 'wazuh-indexer') -and ($tj -match 'wazuh-dashboard')) `
+        $ts.Substring(0, [Math]::Min(200, $ts.Length))
 } catch { Check "InfluxDB" $false $_.Exception.Message }
 
 try {
@@ -200,15 +268,27 @@ try {
   $db = Invoke-WebRequest "$graf/api/search?type=dash-db" -Headers $ga -UseBasicParsing -TimeoutSec 30
   Check "Grafana: dashboard provisionado" ($db.Content -match '"uid":"icinga-stack"') $db.Content
 
-  # El dashboard trae 19 paneles. Se comprueba por id el de Icinga DB, no
-  # solo el recuento: con un panel menos y otro de mas el recuento seguira
-  # cuadrando. Se lee de la API (lo que Grafana sirve), no del JSON.
+  # El dashboard trae 22 paneles (los 19 de la Fase 1 y los 3 del stack
+  # Wazuh). Se comprueba por id, no solo el recuento: con un panel menos y
+  # otro de mas el recuento seguira cuadrando. Se lee de la API (lo que
+  # Grafana sirve), no del JSON.
   $dbf = Invoke-WebRequest "$graf/api/dashboards/uid/icinga-stack" -Headers $ga -UseBasicParsing -TimeoutSec 30
   $dp  = @(($dbf.Content | ConvertFrom-Json).dashboard.panels)
   $hbp = @($dp | Where-Object { $_.id -eq 19 -and $_.title -like "*Icinga DB*" })
-  Check "Grafana: 19 paneles y el de Icinga DB presente" `
-        ($dp.Count -ge 19 -and $hbp.Count -eq 1) `
+  Check "Grafana: 22 paneles y el de Icinga DB presente" `
+        ($dp.Count -ge 22 -and $hbp.Count -eq 1) `
         "$($dp.Count) paneles; panel 19 de Icinga DB: $($hbp.Count)"
+
+  # La tercera pata del criterio de hecho de la Fase 2: "tiene su panel en
+  # Grafana". Ademas se mira la consulta, no solo que el panel exista: si
+  # fuera con la variable $host dejaria de verse en cuanto el selector estuviera
+  # puesto en otro stack, y el panel dejaria de ser "suyo".
+  $wzp = @($dp | Where-Object { $_.id -eq 20 -and $_.title -like "Wazuh*" })
+  $wzq = ''
+  if ($wzp.Count -gt 0) { $wzq = @($wzp[0].targets)[0].query }
+  Check "Grafana: panel del stack Wazuh (id 20) con filtro propio hostname =~ /wazuh/" `
+        (($wzp.Count -eq 1) -and ($wzq -match 'hostname"\s*=~\s*/wazuh/')) `
+        "$($wzp.Count) panel(es) :: $wzq"
 } catch { Check "Grafana" $false $_.Exception.Message }
 
 # --- 6. Copias de seguridad -------------------------------------------------
@@ -261,6 +341,15 @@ try {
                  Where-Object { $_.Backup.Name -eq "icinga-stack" } | Select-Object -First 1
     } catch {}
     Check "Duplicati: copia 'icinga-stack' dada de alta" ($null -ne $entry) "no encontrada"
+
+    # La copia del otro stack (Fase 2). Se guarda la entrada porque su ID es
+    # el que usa la restauracion de mas abajo. El recuento generico de
+    # "declaradas" de mas abajo ya fallaria si faltara, pero por nombre da un
+    # mensaje mucho mas claro.
+    $wzEntry = $null
+    try { $wzEntry = @($all) | Where-Object { $_.Backup.Name -eq "wazuh-stack" } | Select-Object -First 1 } catch {}
+    Check "Duplicati: copia 'wazuh-stack' dada de alta (Fase 2)" `
+          ($null -ne $wzEntry) "no encontrada"
 
     # Cada JSON declarativo de backup/*.json tiene que aparecer en el
     # servidor: es la prueba de que lo declarado y lo real estan
@@ -391,6 +480,12 @@ try {
       $dst = (docker exec $cDup sh -c "find /dest -type f -name duplicati-*.zip" 2>&1) -join "`n"
       Check "Duplicati: ficheros .zip en el destino" ($dst -match '\.zip') $dst
 
+      # 6.6b y en concreto en el subdirectorio propio de la copia nueva.
+      # El de arriba es recursivo, asi que pasaria aunque wazuh-stack no
+      # hubiera dejado ni un byte (o al reves). Cada copia tiene su destino.
+      $dst2 = (docker exec $cDup sh -c "find /dest/wazuh-stack -type f -name duplicati-*.zip" 2>&1) -join "`n"
+      Check "Duplicati: ficheros .zip de wazuh-stack en su destino" ($dst2 -match '\.zip') $dst2
+
       # 6.7 RESTAURACION: recuperar tres ficheros y compararlos con el original
       # Los directorios destino se crean antes a proposito: si no, Duplicati
       # emite dos "CreateMissingFolder" y deja la copia con estado Warning en
@@ -434,6 +529,65 @@ try {
       Check "Duplicati: dump.sql restaurado crea bases" ($cdb -match '\d+') $cdb
 
       docker exec $cDup sh -c "rm -rf /tmp/rtest" | Out-Null
+
+      # 6.7b RESTAURACION de la copia del stack ajeno (Fase 2). La de arriba
+      # solo restaura de la copia icinga-stack; wazuh-stack tiene origenes
+      # distintos y podria estar roto sin que nada lo dijera. Dos rutas bajo
+      # el mismo prefijo, para que Duplicati fije la base en
+      # /sources/otros/wazuh-stack y los ficheros caigan donde toca.
+      #
+      # La ruta del origen en el HOST se lee del compose, igual que hace el
+      # apartado 6.8 con el destino: asi no queda escrita a mano en dos
+      # sitios, y si un dia se mueve el proyecto verify lo sigue.
+      if ($wzEntry) {
+        $wzRoot = ''
+        foreach ($l in [IO.File]::ReadAllLines((Join-Path $projRoot 'docker-compose.yml'))) {
+          if ($l -match '^\s*-\s*(?<src>[A-Za-z]:/[^:]+)/docker-compose\.yml:/sources/otros/wazuh-stack/docker-compose\.yml\s*(?::ro)?\s*$') {
+            $wzRoot = $Matches['src']; break
+          }
+        }
+        Check "Duplicati: origen del stack Wazuh leido del compose" ($wzRoot -ne '') $wzRoot
+
+        if ($wzRoot -ne '') {
+          $wzb = $wzEntry.Backup.ID
+          # Precrear TAMBIEN la subcarpeta destino, no solo la raiz: es lo que
+          # hace el bloque 6.7 de arriba, y sin esto Duplicati emite
+          # CreateMissingFolder, deja la ejecucion en Warning en la UI y
+          # hace parecer fallida una comprobacion que ha salido bien.
+          docker exec $cDup sh -c "rm -rf /tmp/rtest2; mkdir -p /tmp/rtest2/config/wazuh_dashboard" | Out-Null
+          $wrf = Join-Path $env:TEMP "verify_dup_restore_wazuh.json"
+          $wbody = '{"paths":["/sources/otros/wazuh-stack/docker-compose.yml",' +
+                   '"/sources/otros/wazuh-stack/config/wazuh_dashboard/wazuh.yml"],' +
+                   '"time":"","restore_path":"/tmp/rtest2","overwrite":true,"skip_metadata":true}'
+          [System.IO.File]::WriteAllText($wrf, $wbody, (New-Object System.Text.UTF8Encoding($false)))
+          curl.exe -s -X POST "$dup/api/v1/backup/$wzb/restore" -H $hf `
+                   -H "Content-Type: application/json" --data-binary "@$wrf" `
+                   -o (Join-Path $env:TEMP "verify_dup_restore_wazuh_out.json") | Out-Null
+          Start-Sleep -Seconds 8
+
+          $tree2 = (docker exec $cDup sh -c "find /tmp/rtest2 -type f" 2>&1) -join "`n"
+          Check "Duplicati: restauracion de wazuh-stack (compose + wazuh.yml)" `
+                (($tree2 -match 'docker-compose\.yml') -and ($tree2 -match 'wazuh\.yml')) $tree2
+
+          # Bit a bit contra el original. sha256sum dentro del contenedor
+          # para las DOS mitades, en vez de Get-FileHash de PowerShell: el
+          # original vive fuera de $projRoot y asi ambos lados de la
+          # comparacion pasan por el mismo camino que en la prueba 6.7.
+          $wp1 = ($wzRoot -replace '/', '\') + '\docker-compose.yml'
+          $wp2 = ($wzRoot -replace '/', '\') + '\config\wazuh_dashboard\wazuh.yml'
+          $h1 = ''; $h2 = ''
+          try { $h1 = (Get-FileHash -LiteralPath $wp1 -Algorithm SHA256).Hash } catch {}
+          try { $h2 = (Get-FileHash -LiteralPath $wp2 -Algorithm SHA256).Hash } catch {}
+          $r1 = (docker exec $cDup sh -c "sha256sum /tmp/rtest2/docker-compose.yml" 2>&1) -join " "
+          $r2 = (docker exec $cDup sh -c "sha256sum /tmp/rtest2/config/wazuh_dashboard/wazuh.yml" 2>&1) -join " "
+          Check "Duplicati: docker-compose.yml de Wazuh restaurado identico (SHA256)" `
+                (($h1.Length -eq 64) -and ($r1 -match $h1)) "$h1 :: $r1"
+          Check "Duplicati: wazuh.yml del panel restaurado identico (SHA256)" `
+                (($h2.Length -eq 64) -and ($r2 -match $h2)) "$h2 :: $r2"
+
+          docker exec $cDup sh -c "rm -rf /tmp/rtest2" | Out-Null
+        }
+      }
     }
   }
 

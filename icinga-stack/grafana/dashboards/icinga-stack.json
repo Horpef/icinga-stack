@@ -1112,6 +1112,162 @@
       ],
       "title": "Icinga DB — edad del ultimo latido (s) (warn 180 / crit 600)",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Fase 2, stack ajeno. Checks http de los tres contenedores de Wazuh: API del manager (55000, se espera 401), salud del cluster del indexer (9200, cuerpo green) y pagina de acceso del panel (5601, se espera 302). Filtro propio hostname =~ /wazuh/, asi que se ven aunque el selector Host este puesto en otro stack.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "ms",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 56 },
+      "id": 20,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname / $tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") * 1000 AS \"tiempo\" FROM \"http\" WHERE \"metric\" = 'time' AND \"hostname\" =~ /wazuh/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Wazuh — respuesta HTTP (Fase 2)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Fase 2, stack ajeno. Checks tcp a los puertos por donde conectan los agentes de Wazuh: 1514 (eventos) y 1515 (alta). Van separados porque el segundo puede caer mientras el primero sigue vivo, y eso solo se nota cuando alguien intenta dar de alta un agente nuevo.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "ms",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 56 },
+      "id": 21,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname / $tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") * 1000 AS \"tiempo\" FROM \"tcp\" WHERE \"metric\" = 'time' AND \"hostname\" =~ /wazuh/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Wazuh — conexión TCP de los agentes (Fase 2)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Fase 2, stack ajeno. RTA del check ping4 de wazuh-manager, wazuh-indexer y wazuh-dashboard sobre monitoring-net. Es el unico indicador que sigue vivo si el API, el indexer y el panel responden pero los tres contenedores estan colgados, y el primero en desaparecer cuando se corta la red.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }]
+          },
+          "unit": "ms",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 56 },
+      "id": 22,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") * 1000 AS \"RTT\" FROM \"hostalive\" WHERE \"metric\" = 'rta' AND \"hostname\" =~ /wazuh/ AND $timeFilter GROUP BY time($__interval), \"hostname\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Wazuh — ping de los tres contenedores (Fase 2)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

@@ -249,6 +249,10 @@ services:
       - ./icinga2-conf/conf.d/hosts.conf:/etc/icinga2/conf.d/hosts.conf:ro
       - ./icinga2-conf/conf.d/api-users.conf:/etc/icinga2/conf.d/api-users-icingaweb.conf:ro
       - ./icinga2-conf/conf.d/stack-monitoring.conf:/etc/icinga2/conf.d/stack-monitoring.conf:ro
+      # Fase 2: Wazuh (D:\docker\wazuh-stack). OJO: conf.d se monta fichero a
+      # fichero, asi que este .conf nuevo NECESITA su propia linea aqui, o en
+      # el contenedor no aparece y los hosts no se dan de alta.
+      - ./icinga2-conf/conf.d/wazuh.conf:/etc/icinga2/conf.d/wazuh.conf:ro
       - ./icinga2-conf/features-enabled/icingadb.conf:/etc/icinga2/features-enabled/icingadb.conf:ro
       - ./icinga2-conf/features-enabled/ido-mysql.conf:/etc/icinga2/features-enabled/ido-mysql.conf:ro
       - ./icinga2-conf/features-enabled/influxdb.conf:/etc/icinga2/features-enabled/influxdb.conf:ro
@@ -526,6 +530,28 @@ services:
       - ./safety-net.ps1:/sources/project/safety-net.ps1:ro
       - ./verify.ps1:/sources/project/verify.ps1:ro
       - ./web:/sources/project/web:ro
+
+      # --- origenes: otros proyectos --------------------------------------
+      # Los stacks ajenos viven FUERA de este directorio (D:\docker\<stack>),
+      # igual que el destino vive fuera del disco de los datos.
+      #
+      # ENTRADA POR ENTRADA, no el directorio entero: es lo que dice la
+      # seccion "Anadir otro stack" del README, y el motivo es real, no
+      # estetico. Montando el directorio entero, el dia que ese proyecto
+      # tenga tmp/ o una carpeta de sondeos entrarian en la copia sin que
+      # nadie lo decidiera. Asi, el JSON y el compose dicen exactamente lo
+      # mismo: cuatro lineas aqui, cuatro Sources alla.
+      #
+      # OJO con el coste, que es el mismo que ya asume este stack para sus
+      # propios ficheros de primer nivel: un fichero nuevo en el otro
+      # proyecto exige SU linea aqui Y SU Source en backup/wazuh-stack-backup.json,
+      # o simplemente no se copia y nadie se entera. Si el trabajo ya existe,
+      # el `duplicati-init` no lo toca (es idempotente): hay que mandar los
+      # Sources nuevos con `PUT /api/v1/backup/{id}`.
+      - D:/docker/wazuh-stack/docker-compose.yml:/sources/otros/wazuh-stack/docker-compose.yml:ro
+      - D:/docker/wazuh-stack/config:/sources/otros/wazuh-stack/config:ro
+      - D:/docker/wazuh-stack/generate-indexer-certs.yml:/sources/otros/wazuh-stack/generate-indexer-certs.yml:ro
+      - D:/docker/wazuh-stack/regen-dashboard-cert.sh:/sources/otros/wazuh-stack/regen-dashboard-cert.sh:ro
     depends_on:
       mysql-dump:
         condition: service_healthy
