@@ -550,6 +550,25 @@ try {
 
         if ($wzRoot -ne '') {
           $wzb = $wzEntry.Backup.ID
+          # Forzar una copia de wazuh-stack ANTES del restore, igual que el
+          # apartado 6.5 hace con la de icinga. Sin esto el restore compara
+          # el archivo actual en disco contra la ULTIMA COPIA PROGRAMADA, que
+          # queda desfasada en cuanto se toca un fichero de wazuh-stack (un
+          # proyecto vivo): el SHA256 no cuadra y el check falla por un
+          # desfase del backup, no por un problema real. Forzar la copia
+          # hace que el check pruebe lo que dice: actuales -> backup ->
+          # restore -> identico.
+          $wrf2 = Join-Path $env:TEMP "verify_dup_run_wazuh.json"
+          [System.IO.File]::WriteAllText($wrf2, "{}", (New-Object System.Text.UTF8Encoding($false)))
+          curl.exe -s -X POST "$dup/api/v1/backup/$wzb/run" -H $hf `
+                   -H "Content-Type: application/json" --data-binary "@$wrf2" -o $wrf2 | Out-Null
+          $wact = ""; $wt = 0
+          while ($wt -lt 180) {
+            $wact = (curl.exe -s -X GET "$dup/api/v1/backup/$wzb/isactive" -H $hf) -join ""
+            if (($wt -ge 15) -and ($wact -match '"Active":false')) { break }
+            Start-Sleep -Seconds 3; $wt += 3
+          }
+          Check "Duplicati: ejecucion wazuh-stack terminada" ($wact -match '"Active":false') $wact
           # Precrear TAMBIEN la subcarpeta destino, no solo la raiz: es lo que
           # hace el bloque 6.7 de arriba, y sin esto Duplicati emite
           # CreateMissingFolder, deja la ejecucion en Warning en la UI y
@@ -641,6 +660,66 @@ try {
   $mc = (docker exec $cMirror sh -c "test -f /dest/docker-compose.yml && find /dest -type f | wc -l" 2>&1) -join " "
   Check "project-mirror: compose copiado en el espejo" ($mc -match '\d+') $mc
 } catch { Check "project-mirror" $false $_.Exception.Message }
+
+# --- 8. Wazuh: el agente de logs de los contenedores --------------------------
+# wazuh-stack es un stack aparte (mk-clean-test no lo clona), asi que, igual
+# que la red de seguridad del 6.8, esto solo corre en produccion. Copia del
+# criterio de hecho del feature de logs: los dos agentes activos, la regla
+# propia cargada, el logcollector siguiendo los json del daemon y una sonda
+# E2E real (una linea con "error" que tiene que volver como alerta).
+#
+# La sonda 8d protege de la regresion del 2026-10-09: el patron de la regla
+# 100100 tenia unos parentesis que el regex de Wazuh NO interpreta como
+# agrupacion (los exige como literales), de modo que el contenido "error"
+# caia en la regla 1002; y 1002 (level 2) no escribe alerta porque el
+# manager tiene <log_alert_level>3</log_alert_level>. El transporte estaba
+# sano todo el rato: silenciaban dos piezas de configuracion.
+if (-not $CleanTest) {
+  try {
+    # 8a. La API exige JWT: se tokeniza con user/pass y el token se
+    # reutiliza en los GET siguientes.
+    $za0 = docker exec wazuh-manager curl -s -u wazuh-wui:icingaweb123 -k -X POST "https://localhost:55000/security/user/authenticate"
+    $ztok = ((@($za0) -join '') | ConvertFrom-Json).data.token
+    Check "Wazuh: API JWT obtenida" ($ztok -is [string] -and $ztok.Length -gt 20) "token vacio"
+
+    $za1 = docker exec wazuh-manager curl -s -k -H ("Authorization: Bearer " + $ztok) "https://localhost:55000/agents?limit=50"
+    $zitems = ((@($za1) -join '') | ConvertFrom-Json).data.affected_items
+    $znames = @($zitems | ForEach-Object { "$($_.name)=$($_.status)" })
+    $zdock = @($zitems | Where-Object { $_.name -eq 'docker-stacks' -and $_.status -eq 'active' }).Count
+    $zice  = @($zitems | Where-Object { $_.name -eq 'icinga-stacks' -and $_.status -eq 'active' }).Count
+    Check "Wazuh: agentes docker-stacks e icinga-stacks active" `
+          (($zdock -eq 1) -and ($zice -eq 1)) ($znames -join ', ')
+
+    # 8b. La regla propia cargada. OJO: la API de /rules usa
+    # total_affected_items, no "total" como la de /agents.
+    $za2 = docker exec wazuh-manager curl -s -k -H ("Authorization: Bearer " + $ztok) "https://localhost:55000/rules?rule_ids=100100"
+    $zrc = ((@($za2) -join '') | ConvertFrom-Json).data.total_affected_items
+    Check "Wazuh: regla 100100 cargada" ([int]$zrc -ge 1) "total_affected_items=$zrc"
+
+    # 8c. El logcollector analiza tantos json como ficheros hay en el
+    # daemon. "Analyzing file" se emite a nivel INFO (no depende del debug
+    # que se activo durante la investigacion) y se acumula por arranque, de
+    # modo que sirve de cota inferior del seguimiento.
+    $zjf = (docker exec wazuh-agent-icinga sh -c "ls /var/lib/docker/containers/*/*-json.log | wc -l") -join ''
+    $zaf = (docker exec wazuh-agent-icinga sh -c "grep 'Analyzing file' /var/ossec/logs/ossec.log | grep -c json.log") -join ''
+    Check "Wazuh: logcollector analiza todos los json de contenedores" `
+          (([int]$zaf -ge [int]$zjf) -and ([int]$zjf -ge 1)) "analizados=$zaf json=$zjf"
+
+    # 8d. Sonda E2E: se inyecta una linea con "ERROR" en la salida
+    # estandard de un contenedor json-file (via /proc/1/fd/1, que si entra
+    # en el log del daemon; el stdout de `docker exec` no) y se espera ver
+    # la alerta en alerts.log. Unicidad por marca de tiempo para no cazar
+    # alertas de ejecuciones anteriores.
+    $zmark = "verify-e2e-" + (Get-Date -Format "yyyyMMdd-HHmmss")
+    docker exec icinga2 sh -c "echo 'ERROR $zmark sonda de verificacion' > /proc/1/fd/1" | Out-Null
+    $zhits = 0
+    for ($zt = 0; $zt -lt 120 -and $zhits -eq 0; $zt += 10) {
+      Start-Sleep -Seconds 10
+      $zhits = [int]((docker exec wazuh-manager sh -c "grep -c $zmark /var/ossec/logs/alerts/alerts.log" 2>$null) -join '')
+    }
+    Check "Wazuh: sonda E2E con 'error' vuelve como alerta 100100" ($zhits -ge 1) "marcador=$zmark en $zt s"
+  } catch { Check "Wazuh" $false $_.Exception.Message }
+}
 
 "===== TOTAL FALLOS: $fail ====="
 exit $fail

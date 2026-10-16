@@ -1,5 +1,21 @@
+x-logging: &json-logs
+  # Driver json-file EXPLICITO y no el default de la VM (local).
+  # El driver local de Docker Desktop escribe container.log en formato
+  # BINARIO comprimido: docker logs lo entiende, pero cualquier
+  # lector externo (logcollector de Wazuh, filebeat, un tail) solo ve
+  # bytes ilegibles. Ademas este bloque FIJA el comportamiento aunque
+  # cambie el default del demonio. Rotacion: 10 MB x 3 copias por
+  # contenedor, para que el crecimiento sea acotado (el json-file SIN
+  # opciones, como el de icingadb/mailpit antes de este cambio, crece
+  # sin limite y en meses llena el disco de la VM).
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
   mariadb:
+    logging: *json-logs
     image: mysql:8.0
     container_name: icinga-db
     # --- durability vs. speed ------------------------------------------------
@@ -68,6 +84,7 @@ services:
       start_period: 1800s
 
   redis:
+    logging: *json-logs
     image: redis:7-alpine
     container_name: icinga-redis
     command: redis-server --appendonly yes
@@ -85,6 +102,7 @@ services:
   # Daemon that imports Icinga 2's configuration and current state from
   # Redis into the `icingadb` MySQL database (read by Icinga DB Web).
   icingadb:
+    logging: *json-logs
     image: icinga/icingadb:latest
     container_name: icingadb
     environment:
@@ -107,6 +125,7 @@ services:
   # Local SMTP test server. UI: http://localhost:8025
   # Outgoing notification mails of Icinga 2 end up here (MSMTPRC below).
   mailpit:
+    logging: *json-logs
     image: axllent/mailpit:latest
     container_name: mailpit
     environment:
@@ -134,6 +153,7 @@ services:
   # Icinga 2 (InfluxdbWriter feature) and stores it so it can be graphed.
   # Only reachable from the compose network - Grafana is the UI for it.
   influxdb:
+    logging: *json-logs
     image: influxdb:1.8
     container_name: influxdb
     environment:
@@ -152,6 +172,12 @@ services:
       # later if the volume ever matters.
     volumes:
       - influxdb_data:/var/lib/influxdb
+      # Config propio del servidor: el default de la imagen hace un fsync en
+      # CADA escritura (wal-fsync-interval=0s) y sobre el SSD lento de esta
+      # maquina empuja writes por encima del timeout de 10 s de InfluxDB ->
+      # 500 -> critical/InfluxdbWriter -> huecos de metricas. Ver influxdb.conf
+      # para el analisis completo; el cambio es wal-fsync-interval=200ms.
+      - ./influxdb/influxdb.conf:/etc/influxdb/influxdb.conf:ro
     networks:
       - icinga-net
     restart: unless-stopped
@@ -169,6 +195,7 @@ services:
   # provisioned from ./grafana, so a fresh volume comes up ready to use
   # without a single click in the UI. Login: admin / icingaadmin123
   grafana:
+    logging: *json-logs
     image: grafana/grafana:11.2.0
     container_name: grafana
     environment:
@@ -202,6 +229,7 @@ services:
       start_period: 60s
 
   icinga2:
+    logging: *json-logs
     image: icinga/icinga2:latest
     container_name: icinga2
     environment:
@@ -294,6 +322,7 @@ services:
       start_period: 300s
 
   icinga-web:
+    logging: *json-logs
     build:
       context: ./web
     image: icinga-stack-web:latest
@@ -401,6 +430,7 @@ services:
   # exits. `docker compose up -d` starts it after icinga-web is healthy; its
   # progress is visible with `docker compose logs -f director-init`.
   director-init:
+    logging: *json-logs
     image: icinga-stack-web:latest
     build:
       context: ./web
@@ -429,6 +459,7 @@ services:
   # da una copia inconsistente que fallaria al restaurarse.
   # Mas detalle en ./backup/mysql-dump.sh
   mysql-dump:
+    logging: *json-logs
     image: mysql:8.0
     container_name: icinga-mysql-dump
     environment:
@@ -462,6 +493,7 @@ services:
       start_period: 300s
 
   duplicati:
+    logging: *json-logs
     image: duplicati/duplicati:latest
     container_name: icinga-duplicati
     environment:
@@ -575,6 +607,7 @@ services:
   # relanzar `docker compose up -d duplicati-init`; este fichero no cambia.
   # Progreso: `docker compose logs -f duplicati-init`.
   duplicati-init:
+    logging: *json-logs
     image: duplicati/duplicati:latest
     container_name: icinga-duplicati-init
     entrypoint: ["/bin/sh", "/payloads/duplicati-bootstrap.sh"]
@@ -611,6 +644,7 @@ services:
   # Patron identico al de mysql-dump: contenedor sin estado, bucle con
   # intervalo, healthcheck sobre la fecha de la ultima sincronizacion.
   project-mirror:
+    logging: *json-logs
     image: alpine:3.19
     container_name: icinga-project-mirror
     entrypoint: ["/bin/sh", "/mirror/project-mirror.sh"]

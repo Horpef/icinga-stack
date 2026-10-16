@@ -385,14 +385,18 @@ credenciales ya están en claro en `docker-compose.yml`).
 | Alta automática | `backup/duplicati-bootstrap.sh` (contenedor `duplicati-init`) |
 
 > **El destino está en `C:`, a propósito.** Los datos (el `docker_data.vhdx`
-> con todos los volúmenes) y el proyecto viven en `D:`; las copias tenían que
-> ir a un **disco físico distinto**, o un fallo de disco se llevaría datos
-> *y* copias a la vez:
+> con todos los volúmenes) viven en `E:` (SSD SATA) y el proyecto en `D:`;
+> las copias tenían que ir a un **disco físico distinto**, o un fallo de
+> disco se llevaría datos *y* copias a la vez:
 >
 > ```
-> D: (HDD 1 TB)   datos (docker_data.vhdx) + proyecto
-> C: (SSD 256 GB) destino de las copias + espejo del proyecto + red de seguridad
+> E: (SSD SATA 112 GB)  datos (docker_data.vhdx en E:\DockerDesktopWSL)
+> D: (HDD 1 TB)         proyecto (este repositorio)
+> C: (NVMe 256 GB)      destino de las copias + espejo del proyecto + red de seguridad
 > ```
+>
+> El VHDX se movió de D: (HDD, cuello de botella: iowait 53%) a E: (SSD);
+> ver `roadmap.md` (decisión de almacenamiento).
 >
 > `mk-clean-test.ps1` reescribe esa ruta a `./backups` en su copia, para que
 > el clean-test escriba dentro de `_clean-test/` y nunca en el destino real.
