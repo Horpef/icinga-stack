@@ -1,0 +1,114 @@
+<!--
+===========================================================================
+ Regla de errores de contenedores (agente: icinga-stacks)
+===========================================================================
+
+ QUE HACE
+ =========
+ El agente icinga-stacks envia al manager la salida estandard (stdout)
+ de los contenedores del icinga-stack (via logcollector leyendo
+ /var/lib/docker/containers/*/*-json.log). Sin regla propia, esos
+ eventos NO generan alerta: Wazuh descarta lo que no casa con ninguna
+ regla y el dashboard quedaria vacio, pareciendo que la ingesta no
+ funciona. Esta regla es el minimo para que un error visible en la
+ consola de un contenedor acabe en wazuh-alerts.
+
+ VERIFICACION E2E (2026-10-08)
+ =============================
+ Linea con "ERROR" generada en un contenedor con driver json-file ->
+ alerta100100 recuperada del indexer con agent.id=002 y full_log =
+ la linea JSON del contenedor. El E2E se automatiza en verify.ps1
+ (seccion "Wazuh - logcollector de contenedores").
+
+ COMO ESTA ACOTADA (y que se descarto)
+ ======================================
+ <decoded_as>json</decoded_as>: solo los eventos decodados por el
+ decoder "json" (los del logcollector con log_format=json de ESTE
+ agente). Excluye de paso los eventos FIM de docker-stacks
+ (decoded_as syscheck), cuyos diffs de codigo podrian contener la
+ palabra "error" y generarian alertas dobles/ruido.
+
+ DESCARTADO: <hostname>wazuh-agent-icinga</hostname> como alcance.
+ Pese a que el hostname del contenedor-del-agente ES ese (verificado en
+ /etc/hostname), con el filtro puesto la regla NO caso NUNCA ni con
+ eventos json ni con syslog; sin el filtro, la misma regla empezo a
+ alertar al instante. No se contro el motivo interno (¿remoted no rellena
+ lf->hostname en eventos de agente en 4.14.8?); lo que importa: no usarlo
+ para acotar. <decoded_as> cumple la misma funcion y si funciona.
+
+ DESCARTADO: <field name="log">...</field>. Suena mas "tipado" porque
+ las claves del JSON se exponen como campos, pero en 4.14.8 produjo:
+
+     wazuh-analysisd: ERROR: (5107): Syntax error on tag 'log' in rule 100100
+     wazuh-analysisd: CRITICAL: (1220): Error loading the rules
+     wazuh-analysisd: Configuration error. Exiting
+
+ ...y el manager quedo UNHEALTHY: una regla mal formada no se ignora,
+ tumba analysisd entero. Si se retoma esta via, validar primero con
+ `wazuh-logtest` DENTRO del manager y con el manager descartando
+ <decoded_as>/<hostname>, y jamas en caliente sin comprobar
+ `docker logs wazuh-manager` tras el arranque.
+
+ <match> es case-INsensitive (documentado y verificado: patron en
+ minusculas cazando "ERROR" en mayusculas), por eso el patron no
+ repite variantes. Ademas VE el contenido del JSON aunque el evento
+ este decodado como "json" (tambien verificado; la hipotesis de que el
+ mensaje quedaba vacio y <match> quedaba ciego era FALSA: el unico
+ culpable era <hostname>).
+
+ TRAMPA: NUNCA envolver <match> en parentesis de agrupacion
+ (no usar "(error|fatal)"). El regex engine de Wazuh (OSRegex) NO
+ agrupa con (): los trata como literales, de modo que
+ "(error|critical|...|refused)" exige un "(" antes de "error" y un
+ ")" despues de "refused". Verificado con wazuh-logtest: la linea
+ "aaa error bbb" NO casaba (y "foo (error) bar" SI), mientras que
+ "fatal", "panic", "denied" (alternativas intermedias) casaban
+ siempre. El fallo era silencioso: el contenido "error" caia en la
+ regla 1002 y, ademas, 1002 (level 2) jamas escribe alerta porque
+ ossec.conf del manager tiene <log_alert_level>3</log_alert_level>
+ (2026-10-09: por eso cero alertas pese a logcollector leyendo y
+ enviando todo correctamente).
+
+ TRAMPA: <log_alert_level>3</log_alert_level> en el ossec.conf del
+ manager descarta cualquier alerta de level < 3 (p. ej. la regla
+ 1002 "Unknown problem somewhere in the system", level 2). Si una
+ regla propia casa pero no ves alerta, subele el level a >= 3 o
+ revisa ese umbral antes de sospechar del transporte.
+
+ SI UN CONTENEDOR TRUIENA ALERTAS
+ ================================
+ Un servicio critico de Icinga puede escribir "critical" en cada check
+ (cada30s) y generara una alerta por linea: es correcto (hay algo roto),
+ pero si el ruido molesta las perillas, de menor a mayor impacto:
+   * <frequency>300</frequency>  -> minimo una alerta cada5 min por
+     evento similar (mismo id+origen), en vez de una por linea.
+   * Subir el level a10 -> solo alerta si las reglas de severidad
+     normalizan a >=10.
+   * Acotar el patron (quitar "critical" y dejar solo errores fatales).
+ No se ha puesto frequency por defecto a proposito: en un sistema de
+ monitorizacion, ver TODO lo que un contenedor grita es la gracia.
+
+ EL FICHERO Y SU MONTAJE
+ ========================
+ Este fichero se monta en /wazuh-config-mount/etc/rules/ y la imagen
+ lo copia a /var/ossec/etc/rules/ al ARRANCAR el contenedor. OJO: un
+ `docker restart` NO vuelve a copiar (la init solo copia en el arranque
+ del contenedor... en la practica: para actualizar reglas usar
+ `docker compose up -d --force-recreate wazuh.manager`; verificado:
+ tras restart seguia la copia vieja, tras recreate entro la nueva).
+ El wazuh_manager.conf del stack ya declara
+ <rule_dir>etc/rules</rule_dir> (bloque "User-defined ruleset"), asi
+ que no hay que tocar nada mas. IDs propios: >=100000 para no pisar la
+ numeracion del ruleset por defecto.
+-->
+
+<group name="docker,containers,error,">
+
+  <rule id="100100" level="5">
+    <decoded_as>json</decoded_as>
+    <match>error|critical|fatal|panic|exception|traceback|denied|refused</match>
+    <description>Contenedor del icinga-stack: linea de error en su salida estandard</description>
+    <group>container_error,</group>
+  </rule>
+
+</group>

@@ -1,0 +1,80 @@
+---
+# This is the internal user database
+# The hash value is a bcrypt hash and can be generated with plugin/tools/hash.sh
+#
+# Cambio de credenciales respecto a la version oficial de Wazuh -------------------------------------------------
+# El fichero de fabrica trae hashes de contraseñas PUBLICAS (SecretPassword,
+# kibanaserver, ...): estan en todos los foros y son las que usa cualquiera
+# que baje este stack. Ningun servidor de seguridad puede arrancar con una
+# clave que ya esta publicada, asi que aqui los SEIS usuarios de ejemplo
+# quedan con la contraseña admin del proyecto (icingaadmin123), la misma que
+# web, Grafana y Duplicati, y documentada en el README igual que el resto.
+#
+# Los hashes NO son reversibles: con ellos no se deduce la contraseña, solo
+# sirve para verificarla. Para regenerar uno (si se cambia la contraseña):
+#
+#   docker run --rm -e OPENSEARCH_JAVA_HOME=/usr/share/wazuh-indexer/jdk `
+#     --entrypoint bash wazuh/wazuh-indexer:4.14.8 `
+#     /usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p <clave>
+#
+# y pegar la salida en el `hash:` correspondiente. Cada ejecucion da un hash
+# distinto aunque la clave sea la misma (bcrypt lleva sal aleatoria), por eso
+# los seis no son iguales.
+#
+# Ojo: admin y kibanaserver tienen que coincidir con INDEXER_PASSWORD y
+# DASHBOARD_PASSWORD en docker-compose.yml; wazuh-wui no esta aqui porque su
+# clave se cambia por variable de entorno, en internal_users solo estan estos.
+# -----------------------------------------------------------------------------------------------
+
+_meta:
+  type: "internalusers"
+  config_version: 2
+
+# Define your internal users here
+
+## Demo users
+
+admin:
+  hash: "$2y$12$23Q1PgFLkbVVA5XJ7wRXWu71kR7OuVwodPV6ERox.Ss3LDg83MEvi"
+  reserved: true
+  backend_roles:
+  - "admin"
+  description: "Wazuh admin (login del panel y API del indexer)"
+
+kibanaserver:
+  hash: "$2y$12$DF/PdhCQDR1KKilp5DNGw.55CQWJd4Cos8kB0JQET20h0jJHrmFdy"
+  reserved: true
+  description: "Usuario interno del dashboard"
+
+kibanaro:
+  hash: "$2y$12$.OtAH4pvopy0oThLddqA5efR68zBCHg95a9SKP54cfQlDOzWIjFaW"
+  reserved: false
+  backend_roles:
+  - "kibanauser"
+  - "readall"
+  attributes:
+    attribute1: "value1"
+    attribute2: "value2"
+    attribute3: "value3"
+  description: "Demo kibanaro user"
+
+logstash:
+  hash: "$2y$12$H1TsZCtdrL30Doc3ElS0F.17FDV8zrlVzmIQZlE105DswGSeVptGW"
+  reserved: false
+  backend_roles:
+  - "logstash"
+  description: "Demo logstash user"
+
+readall:
+  hash: "$2y$12$gsgWJJ3b7Rxot7UrOVx47.fQiaGqnAs5KT79aJv.7g8jxDUW1mBm2"
+  reserved: false
+  backend_roles:
+  - "readall"
+  description: "Demo readall user"
+
+snapshotrestore:
+  hash: "$2y$12$G0wJQZCWS2cMN/E5UlCOnunlG2QIdpk3hkuhdIzqHnbaQB9.npmjK"
+  reserved: false
+  backend_roles:
+  - "snapshotrestore"
+  description: "Demo snapshotrestore user"

@@ -1,0 +1,338 @@
+# ---------------------------------------------------------------------------
+# Wazuh 4.14.8 -- single node (SIEM / seguridad)
+#
+# Stack nuevo #1: es la "Fase 2" del roadmap, el primer stack que no es el
+# propio stack de monitorizacion. Se separa en directorio y proyecto propios
+# (D:\docker\wazuh-stack) y solo se cuelga de la red externa monitoring-net,
+# que es exactamente el gancho que dejo preparado el README de icinga-stack
+# para conectar proyectos nuevos sin tocar nada alla.
+#
+# Basado en el compose oficial de wazuh/wazuh-docker tag v4.14.8 (ultima
+# estable; la v5.0.0 es release candidate). Las diferencias con lo oficial
+# estan comentadas una a una abajo, no se toca nada sin motivo.
+# ---------------------------------------------------------------------------
+
+services:
+
+  # --- analizador: reglas, FIM, logcollector, API ---------------------------
+  wazuh.manager:
+    image: wazuh/wazuh-manager:4.14.8
+    container_name: wazuh-manager
+    # El hostname es el NOMBRE DEL NODO de Wazuh y tiene que coincidir con el
+    # CN del certificado generado en config/certs.yml, o filebeat no valida.
+    # Por eso no se renombra a "wazuh-manager": el DNS interno de la red
+    # resuelve tambien el nombre de servicio (alias en networks.aliases).
+    hostname: wazuh.manager
+    restart: unless-stopped
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 655360
+        hard: 655360
+    # RAM acotada a proposito: el equipo tiene 15,9 GB y Docker ve 7,73 GB,
+    # de los que el stack de monitorizacion ya ocupa 1,3. Sin este limite el
+    # indexer (JVM) crece hasta comerse el presupuesto y el primero en
+    # resbalar seria Icinga, que es el que avisa.
+    mem_limit: 1280m
+    ports:
+      - "1514:1514"      # agentes: conexion
+      - "1515:1515"      # agentes: enrollment
+      - "55000:55000"    # API -- para verify.ps1 desde el host
+      # 514/udp (syslog) NO se publica: solo hace falta si algo de fuera
+      # del Docker manda logs, y un puerto syslog abierto en el host es
+      # puerta de entrada para inyectar eventos falsos. Los contenedores
+      # de monitoring-net llegan por la red sin publicar nada.
+    environment:
+      - INDEXER_URL="https://wazuh.indexer:9200"
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=icingaadmin123
+      - FILEBEAT_SSL_VERIFICATION_MODE=full
+      - SSL_CERTIFICATE_AUTHORITIES=/etc/ssl/root-ca.pem
+      - SSL_CERTIFICATE=/etc/ssl/filebeat.pem
+      - SSL_KEY=/etc/ssl/filebeat.key
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=icingaweb123
+    volumes:
+      - wazuh_api_configuration:/var/ossec/api/configuration
+      - wazuh_etc:/var/ossec/etc
+      - wazuh_logs:/var/ossec/logs
+      - wazuh_queue:/var/ossec/queue
+      - wazuh_var_multigroups:/var/ossec/var/multigroups
+      - wazuh_integrations:/var/ossec/integrations
+      - wazuh_active_response:/var/ossec/active-response/bin
+      - wazuh_agentless:/var/ossec/agentless
+      - wazuh_wodles:/var/ossec/wodles
+      - filebeat_etc:/etc/filebeat
+      - filebeat_var:/var/lib/filebeat
+      - ./config/wazuh_indexer_ssl_certs/root-ca-manager.pem:/etc/ssl/root-ca.pem
+      - ./config/wazuh_indexer_ssl_certs/wazuh.manager.pem:/etc/ssl/filebeat.pem
+      - ./config/wazuh_indexer_ssl_certs/wazuh.manager-key.pem:/etc/ssl/filebeat.key
+      - ./config/wazuh_cluster/wazuh_manager.conf:/wazuh-config-mount/etc/ossec.conf
+      # Reglas propias: la imagen las copia a /var/ossec/etc/rules/ y el
+      # wazuh_manager.conf ya las carga via <rule_dir>etc/rules</rule_dir>.
+      # De directorio, no de fichero, para poder seguir agregando reglas
+      # sin tocar este compose.
+      - ./config/wazuh_cluster/rules:/wazuh-config-mount/etc/rules:ro
+    networks:
+      monitoring-net:
+        aliases:
+          - wazuh.manager
+    healthcheck:
+      # El API escucha en 55000; /dev/tcp es bash puro, no depende de curl
+      # ni de nc, que no estan garantizados en la imagen.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/55000"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # --- indice: OpenSearch con la seguridad de Wazuh encima -----------------
+  wazuh.indexer:
+    image: wazuh/wazuh-indexer:4.14.8
+    container_name: wazuh-indexer
+    hostname: wazuh.indexer
+    restart: unless-stopped
+    # A DIFERENCIA de lo oficial: no se publica el 9200 en el host. Es un
+    # servicio interno -- lo usan el manager y el dashboard, y lo comprueba
+    # Icinga desde monitoring-net. Publicarlo expondria el indice (y su
+    # autenticacion) a la red local sin ninguna necesidad.
+    #
+    # El heap va a 1 g como el oficial. Wazuh recomienda 4 GB minimo y 16 GB
+    # para el indexer; aqui se le dan 2,5 GB de tope, por debajo de ese
+    # minimo. Para un lab con pocos agentes y volumen bajo aguanta, y es lo
+    # primero que se toca si se queda corto.
+    mem_limit: 2560m
+    environment:
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - wazuh-indexer-data:/var/lib/wazuh-indexer
+      - ./config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-indexer/config/certs/root-ca.pem
+      - ./config/wazuh_indexer_ssl_certs/wazuh.indexer-key.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.key
+      - ./config/wazuh_indexer_ssl_certs/wazuh.indexer.pem:/usr/share/wazuh-indexer/config/certs/wazuh.indexer.pem
+      - ./config/wazuh_indexer_ssl_certs/admin.pem:/usr/share/wazuh-indexer/config/certs/admin.pem
+      - ./config/wazuh_indexer_ssl_certs/admin-key.pem:/usr/share/wazuh-indexer/config/certs/admin-key.pem
+      - ./config/wazuh_indexer/wazuh.indexer.yml:/usr/share/wazuh-indexer/config/opensearch.yml
+      - ./config/wazuh_indexer/internal_users.yml:/usr/share/wazuh-indexer/config/opensearch-security/internal_users.yml
+    networks:
+      monitoring-net:
+        aliases:
+          - wazuh.indexer
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9200"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+
+  # --- interfaz de usuario -------------------------------------------------
+  wazuh.dashboard:
+    image: wazuh/wazuh-dashboard:4.14.8
+    container_name: wazuh-dashboard
+    hostname: wazuh.dashboard
+    restart: unless-stopped
+    mem_limit: 1024m
+    ports:
+      # El oficial publica "443:5601". Aqui 5601:5601 por dos motivos: 443
+      # no aporta nada (el propio panel ya va con TLS dentro) y el 8443 ya
+      # lo lleva Icinga Web, asi que el rango de puertos altos queda legible
+      # (8080/8443 web, 3000 grafana, 5601 wazuh, 8200 duplicati).
+      - "5601:5601"
+    environment:
+      - INDEXER_USERNAME=admin
+      - INDEXER_PASSWORD=icingaadmin123
+      - WAZUH_API_URL=https://wazuh.manager
+      - DASHBOARD_USERNAME=kibanaserver
+      - DASHBOARD_PASSWORD=icingaadmin123
+      - API_USERNAME=wazuh-wui
+      - API_PASSWORD=icingaweb123
+    volumes:
+      - ./config/wazuh_indexer_ssl_certs/wazuh.dashboard.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard.pem
+      - ./config/wazuh_indexer_ssl_certs/wazuh.dashboard-key.pem:/usr/share/wazuh-dashboard/certs/wazuh-dashboard-key.pem
+      - ./config/wazuh_indexer_ssl_certs/root-ca.pem:/usr/share/wazuh-dashboard/certs/root-ca.pem
+      - ./config/wazuh_dashboard/opensearch_dashboards.yml:/usr/share/wazuh-dashboard/config/opensearch_dashboards.yml
+      - ./config/wazuh_dashboard/wazuh.yml:/usr/share/wazuh-dashboard/data/wazuh/config/wazuh.yml
+      - wazuh-dashboard-config:/usr/share/wazuh-dashboard/data/wazuh/config
+      - wazuh-dashboard-custom:/usr/share/wazuh-dashboard/plugins/wazuh/public/assets/custom
+    depends_on:
+      - wazuh.indexer
+      - wazuh.manager
+    networks:
+      monitoring-net:
+        aliases:
+          - wazuh.dashboard
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5601"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+
+  # --- agente: FIM sobre la declaracion de los dos proyectos ---------------
+  # El motivo de existir de este contenedor: que quede registro de quien
+  # cambia una linea de la infraestructura y cuando. No es un agente de
+  # "servicio monitorizado" (eso ya lo hace Icinga), es el ojo de seguridad
+  # sobre el codigo declarativo.
+  #
+  # Es el UNICO contenedor de este proyecto que no es parte del stack de
+  # Wazuh sino su cliente, y por eso no lleva alias con punto ni publica
+  # puertos: nadie se conecta a el, el se conecta al manager por 1514/1515
+  # dentro de monitoring-net.
+  wazuh.agent:
+    image: wazuh/wazuh-agent:4.14.8
+    container_name: wazuh-agent
+    hostname: wazuh-agent
+    restart: unless-stopped
+    # 192 m. El agente solo barre ~60 ficheros de configuracion, no tiene
+    # nada que ver con el manager: sin limite se le daría lo que pidiera, y
+    # con 0,8 GB libres en el equipo cada gota cuenta.
+    mem_limit: 192m
+    environment:
+      # OJO con el nombre de la variable: en wazuh/wazuh-agent:4.14.8 el
+      # script /etc/cont-init.d/0-wazuh-init lee WAZUH_MANAGER_SERVER y NO
+      # WAZUH_MANAGER (que es el que aparece en versiones antiguas y en
+      # muchos ejemplos por ahi). Si se pone mal, el sed no sustituye
+      # CHANGE_MANAGER_IP, ossec.conf queda con el marcador literal y el
+      # agente no arranca.
+      - WAZUH_MANAGER_SERVER=wazuh.manager
+      # Nombre fijo y explicito. Si no se pone, el predeterminado es
+      # wazuh-agent-$HOSTNAME, y como el hostname cambia al recrear el
+      # contenedor, cada recreacion daria de alta un agente distinto y el
+      # manager rechazaria el nuevo por "Duplicate agent name".
+      - WAZUH_AGENT_NAME=docker-stacks
+    volumes:
+      # Las DOS claves de estado. wazuh-agent-etc guarda client.keys: si se
+      # pierde, el agente vuelve a darse de alta y choca con su entrada
+      # anterior, que sigue en el manager. wazuh-agent-queue guarda la base
+      # de datos de syscheck: si se pierde, el proximo arranque trata TODO
+      # como linea base nueva y no acusa ningun cambio anterior. Los dos
+      # volumenes hacen que recrear el contenedor sea inocuo.
+      - wazuh-agent-etc:/var/ossec/etc
+      - wazuh-agent-queue:/var/ossec/queue
+      # El ossec.conf NO se monta sobre /var/ossec/etc/ossec.conf: la imagen
+      # lo copia desde /wazuh-config-mount y aplica el sed sobre la copia.
+      # Montado en directo, el sed acabaria escribiendo en este fichero.
+      # :ro para que eso sea imposible aunque cambie la imagen.
+      - ./config/agent/wazuh_agent.conf:/wazuh-config-mount/etc/ossec.conf:ro
+      # Los dos arboles a vigilar. :ro porque el FIM solo lee, y porque una
+      # herramienta de auditoria no puede ser capaz de modificar aquello que
+      # audita.
+      - D:/docker/icinga-stack:/mon/icinga-stack:ro
+      - D:/docker/wazuh-stack:/mon/wazuh-stack:ro
+    depends_on:
+      - wazuh.manager
+    networks:
+      # Sin aliases y sin puertos publicados: ver el comentario del servicio.
+      - monitoring-net
+    healthcheck:
+      # client.keys vacio (o ausente) = la alta con el manager no se ha
+      # completado. No se comprueba que el proceso viva, sino que el agente
+      # esta DE REGISTRO, que es lo que de verdad importa: un agente
+      # desconectado sigue teniendo su binario corriendo.
+      test: ["CMD", "bash", "-c", "test -s /var/ossec/etc/client.keys"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # ---------------------------------------------------------------------
+  # Agente de LOGS del stack de monitorizacion (nombre: icinga-stacks).
+  #
+  # Jurisdiccion distinta de la del agente de arriba: docker-stacks vigila
+  # LOS FICHEROS de los proyectos (FIM), este recoge LO QUE IMPRIMEN los
+  # contenedores del icinga-stack. Por eso su ossec.conf lleva syscheck
+  # desactivado: si ambos vigilaran /mon/icinga-stack, un cambio de
+  # fichero generaria dos alertas (una por agente) y el ruido enmascaria
+  # la senal.
+  #
+  # El montaje de /var/lib/docker/containers parece imposible desde
+  # Windows (el directorio vive dentro de la VM de WSL), pero quien
+  # resuelve el bind es el daemon, y ese SI lo ve. Verificado con un
+  # `docker run -v ... ls` antes de montarlo (2026-10-08).
+  #
+  # LA FRONTERA ES EL DRIVER DE LOGGING, NO UNA LISTA DE EXCLUSIONES.
+  # El icinga-stack declara json-file explicito (con rotacion 10m x3), asi
+  # que cada contenedor escribe UN fichero *-json.log y el wildcard de
+  # logcollector los cubre a todos. El wazuh-stack se queda en el driver
+  # por defecto del daemon (local), que escribe en su subdir local-logs/ en
+  # formato binario y NO casa con *-json.log: los contenedores de Wazuh
+  # quedan fuera del wildcard SIN tocar ninguna lista. Es deliberado: si el
+  # agente leyera los logs del propio Wazuh, cada alerta escribiria un log
+  # que generaria otra alerta (bucle sin fin). La salud del indexer y del
+  # manager la cubren los servicios de Icinga, no el logcollector.
+  # ---------------------------------------------------------------------
+  wazuh.agent.icinga:
+    image: wazuh/wazuh-agent:4.14.8
+    container_name: wazuh-agent-icinga
+    hostname: wazuh-agent-icinga
+    restart: unless-stopped
+    # 256 m: mas que el agente FIM (192 m) porque el logcollector mantiene
+    # abiertos y sigue ~17 ficheros a la vez.
+    mem_limit: 256m
+    environment:
+      - WAZUH_MANAGER_SERVER=wazuh.manager
+      # Nombre fijo y explicito, misma razon que en el otro agente: la
+      # clave persistida en su volumen propio se reutiliza al recrear y
+      # no choca con la entrada anterior ("Duplicate agent name").
+      - WAZUH_AGENT_NAME=icinga-stacks
+    volumes:
+      # SU propio client.keys y SU base de syscheck: NUNCA compartir los
+      # volumenes con el agente docker-stacks (dos agentes, dos claves).
+      - wazuh-agent-icinga-etc:/var/ossec/etc
+      - wazuh-agent-icinga-queue:/var/ossec/queue
+      # Mismo patron oficial que el otro agente: la imagen copia desde
+      # /wazuh-config-mount y aplica el sed de los marcadores CHANGE_*.
+      - ./config/agent/wazuh_agent_logs.conf:/wazuh-config-mount/etc/ossec.conf:ro
+      # Logs de TODOS los contenedores del daemon. Ruta absoluta que solo
+      # existe en la VM; :ro porque un agente de auditoria no puede
+      # modificar aquello que audita (y el daemon json-file escribe el).
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    depends_on:
+      - wazuh.manager
+    networks:
+      - monitoring-net
+    healthcheck:
+      # Mismo criterio que el otro agente: client.keys con contenido =
+      # alta con el manager completada.
+      test: ["CMD", "bash", "-c", "test -s /var/ossec/etc/client.keys"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+volumes:
+  wazuh_api_configuration:
+  wazuh_etc:
+  wazuh_logs:
+  wazuh_queue:
+  wazuh_var_multigroups:
+  wazuh_integrations:
+  wazuh_active_response:
+  wazuh_agentless:
+  wazuh_wodles:
+  filebeat_etc:
+  filebeat_var:
+  wazuh-indexer-data:
+  wazuh-dashboard-config:
+  wazuh-dashboard-custom:
+  # Del agente: la clave de registro y la base de datos de syscheck.
+  wazuh-agent-etc:
+  wazuh-agent-queue:
+  # Del agente de logs (icinga-stacks): su clave y su base, aparte.
+  wazuh-agent-icinga-etc:
+  wazuh-agent-icinga-queue:
+
+# Red externa compartida con el stack de monitorizacion. Sin esto Icinga no
+# ve los contenedores por nombre y habria que andar con host.docker.internal.
+networks:
+  monitoring-net:
+    external: true
+    name: monitoring-net

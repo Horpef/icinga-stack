@@ -3,13 +3,15 @@
 # ============================================================================
 #
 #  Criterio: se versiona declaracion, no resultado. Todo lo que se puede
-#  regenerar con un script del propio proyecto aqui no va.
+#  regenerar con un script del propio proyecto aqui no va. Raiz del monorepo:
+#  cubre icinga-stack/ y wazuh-stack/ (los patrones sin barra inicial casan
+#  a cualquier profundidad).
 
 # --- generado por el proyecto ----------------------------------------------
 
-# Copia de pruebas que crea mk-clean-test.ps1. Se regenera entera con `mk`
-# y se borra tras cada clean-test: versionarla solo genera ruido y ademas
-# invita a levantar un clean-test desactualizado.
+# Copia de pruebas que crea mk-clean-test.ps1 (en icinga-stack). Se regenera
+# entera con `mk` y se borra tras cada clean-test: versionarla solo genera
+# ruido y ademas invita a levantar un clean-test desactualizado.
 _clean-test/
 
 # Destino de las copias. En produccion es C:\docker-backups y en el
@@ -36,5 +38,7 @@ desktop.ini
 *.swp
 *~
 
-# NO ignorar *.sql: los de mysql-init/ son fuente y hacen falta para que el
-# stack se levante desde cero.
+# NO ignorar *.sql: los de icinga-stack/mysql-init/ son fuente y hacen falta
+# para que el stack se levante desde cero. Tampoco los .pem de
+# wazuh-stack/config/wazuh_indexer_ssl_certs/: son la declaracion TLS que
+# permite levantar el stack, igual que las credenciales en claro.
