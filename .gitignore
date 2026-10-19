@@ -4,8 +4,8 @@
 #
 #  Criterio: se versiona declaracion, no resultado. Todo lo que se puede
 #  regenerar con un script del propio proyecto aqui no va. Raiz del monorepo:
-#  cubre icinga-stack/ y wazuh-stack/ (los patrones sin barra inicial casan
-#  a cualquier profundidad).
+#  cubre icinga-stack/, wazuh-stack/ y oracle-stack/ (los patrones sin barra
+#  inicial casan a cualquier profundidad).
 
 # --- generado por el proyecto ----------------------------------------------
 

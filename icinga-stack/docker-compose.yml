@@ -286,6 +286,9 @@ services:
       # fichero, asi que este .conf nuevo NECESITA su propia linea aqui, o en
       # el contenedor no aparece y los hosts no se dan de alta.
       - ./icinga2-conf/conf.d/wazuh.conf:/etc/icinga2/conf.d/wazuh.conf:ro
+      # Stack nuevo #2: app + Oracle (D:\docker\oracle-stack). Mismo motivo que
+      # la linea de wazuh.conf: conf.d se monta fichero a fichero.
+      - ./icinga2-conf/conf.d/oracle.conf:/etc/icinga2/conf.d/oracle.conf:ro
       - ./icinga2-conf/features-enabled/icingadb.conf:/etc/icinga2/features-enabled/icingadb.conf:ro
       - ./icinga2-conf/features-enabled/ido-mysql.conf:/etc/icinga2/features-enabled/ido-mysql.conf:ro
       - ./icinga2-conf/features-enabled/influxdb.conf:/etc/icinga2/features-enabled/influxdb.conf:ro
@@ -589,6 +592,13 @@ services:
       - D:/docker/wazuh-stack/config:/sources/otros/wazuh-stack/config:ro
       - D:/docker/wazuh-stack/generate-indexer-certs.yml:/sources/otros/wazuh-stack/generate-indexer-certs.yml:ro
       - D:/docker/wazuh-stack/regen-dashboard-cert.sh:/sources/otros/wazuh-stack/regen-dashboard-cert.sh:ro
+
+      # Stack nuevo #2 (app + Oracle): su copia es SOLO la declaracion (compose,
+      # codigo de la app, README). Los datafiles de la BD NO se copian en
+      # caliente; eso lo hace safety-net.ps1 con el stack parado (copia en frio).
+      - D:/docker/oracle-stack/docker-compose.yml:/sources/otros/oracle-stack/docker-compose.yml:ro
+      - D:/docker/oracle-stack/app:/sources/otros/oracle-stack/app:ro
+      - D:/docker/oracle-stack/README.md:/sources/otros/oracle-stack/README.md:ro
     depends_on:
       mysql-dump:
         condition: service_healthy

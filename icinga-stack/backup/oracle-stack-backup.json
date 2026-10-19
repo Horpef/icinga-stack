@@ -1,0 +1,23 @@
+{
+  "Backup": {
+    "Name": "oracle-stack",
+    "Description": "Copia del stack de la app + Oracle (stack nuevo #2): el compose, el codigo de la app y su README. El origen son los tres elementos del otro proyecto, montados ENTRADA POR ENTRADA en el servicio duplicati; si ese proyecto gana un fichero de primer nivel, hay que anadirlo a las dos mitades (compose + este JSON) o no se copia. NO incluye el volumen oracle_data (los datafiles de la BD): copiar un datadir de base de datos EN CALIENTE da una copia inconsistente que puede fallar al restaurarse (ver README, *Ojo con las bases de datos*). La red de seguridad (safety-net.ps1) SI vuelca oracle_data, pero con el stack PARADO, que es una copia en frio y por tanto consistente.",
+    "TargetURL": "file:///dest/oracle-stack",
+    "Sources": [
+      "/sources/otros/oracle-stack/docker-compose.yml",
+      "/sources/otros/oracle-stack/app",
+      "/sources/otros/oracle-stack/README.md"
+    ],
+    "Settings": [
+      { "Name": "--no-encryption", "Value": "true" },
+      { "Name": "retention-policy", "Value": "14D:0s,8W:7D,1Y:30D" },
+      { "Name": "log-retention", "Value": "30D" }
+    ],
+    "Filters": []
+  },
+  "Schedule": {
+    "Time": "2026-10-05T05:00:00",
+    "Repeat": "1D",
+    "AllowedDays": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+  }
+}

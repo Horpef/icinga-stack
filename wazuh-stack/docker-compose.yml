@@ -230,6 +230,10 @@ services:
       # audita.
       - D:/docker/icinga-stack:/mon/icinga-stack:ro
       - D:/docker/wazuh-stack:/mon/wazuh-stack:ro
+      # Tercer stack (app + Oracle): mismo trato, solo los ficheros declarativos
+      # del proyecto (compose, app/). Los datos de la BD NO viven aqui, viven en
+      # el volumen oracle_data, que se respalda aparte (safety-net/Duplicati).
+      - D:/docker/oracle-stack:/mon/oracle-stack:ro
     depends_on:
       - wazuh.manager
     networks:

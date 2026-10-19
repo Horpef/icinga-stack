@@ -1268,6 +1268,153 @@
       ],
       "title": "Wazuh — ping de los tres contenedores (Fase 2)",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Stack nuevo #2 (app + Oracle). Tiempo de respuesta del check http a /health de la app, que ejecuta un SELECT contra Oracle. Filtro propio `hostname =~ /oracle/` (no $host) para que siga viendose cuando el filtro Host este puesto en otro stack.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "ms",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 64 },
+      "id": 23,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname / $tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") * 1000 AS \"tiempo\" FROM \"http\" WHERE \"metric\" = 'time' AND \"hostname\" =~ /oracle/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Oracle — salud app+BD por HTTP (stack nuevo #2)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Stack nuevo #2. Checks tcp a los puertos de servicio: 1521 (listener de Oracle) y 8080 (la app). Van juntos porque el listener puede caer sin que la app muera y viceversa.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "ms",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": true,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 64 },
+      "id": 24,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname / $tag_service",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") * 1000 AS \"tiempo\" FROM \"tcp\" WHERE \"metric\" = 'time' AND \"hostname\" =~ /oracle/ AND $timeFilter GROUP BY time($__interval), \"hostname\", \"service\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Oracle — conexión TCP (1521 listener / 8080 app)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+      "description": "Stack nuevo #2. RTA del check ping4 de oracle-db y oracle-app sobre monitoring-net. Es el indicador que sigue vivo si los puertos responden pero el contenedor esta colgado, y el primero en desaparecer si se corta la red.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "min": 0,
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "ms",
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 64 },
+      "id": 25,
+      "options": {
+        "legend": { "calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        {
+          "alias": "$tag_hostname",
+          "datasource": { "type": "influxdb", "uid": "icinga-influx" },
+          "query": "SELECT mean(\"value\") * 1000 AS \"RTT\" FROM \"hostalive\" WHERE \"metric\" = 'rta' AND \"hostname\" =~ /oracle/ AND $timeFilter GROUP BY time($__interval), \"hostname\" fill(null)",
+          "rawQuery": true,
+          "refId": "A",
+          "resultFormat": "time_series"
+        }
+      ],
+      "title": "Oracle — ping de los dos contenedores (stack nuevo #2)",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

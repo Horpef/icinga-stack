@@ -88,21 +88,24 @@ Enlaces:
 ## Qué monitoriza
 
 La definición vive en `icinga2-conf/conf.d/stack-monitoring.conf` (los seis
-hosts del propio stack) y en `icinga2-conf/conf.d/wazuh.conf` (los tres del
-stack ajeno de la Fase 2):
+hosts del propio stack), en `icinga2-conf/conf.d/wazuh.conf` (los tres del
+stack ajeno de la Fase 2) y en `icinga2-conf/conf.d/oracle.conf` (los dos del
+stack nuevo #2):
 
-* **9 hosts**: `icinga2`, `icinga-web`, `icingadb`, `mariadb`, `redis`,
-  `mailpit` y, viniendo de otro proyecto, `wazuh-manager`, `wazuh-indexer` y
-  `wazuh-dashboard`
-* **40 servicios**: ping/TCP de cada servicio, HTTP y HTTPS de la web
+* **11 hosts**: `icinga2`, `icinga-web`, `icingadb`, `mariadb`, `redis`,
+  `mailpit`; viniendo de otro proyecto, `wazuh-manager`, `wazuh-indexer` y
+  `wazuh-dashboard`; y del stack nuevo #2, `oracle-db` y `oracle-app`
+* **45 servicios**: ping/TCP de cada servicio, HTTP y HTTPS de la web
   (esperan 302, que es lo que devuelve el login), API de Icinga 2 (200 con
   auth), UI de Mailpit, conexión/uptime/uso de MySQL, disco, carga, procesos…,
   el **heartbeat de Icinga DB** (ver la sección propia), los **5
-  `Backup - *`** descritos más abajo, y los **8 de Wazuh**: API en 55000
+  `Backup - *`** descritos más abajo, los **8 de Wazuh**: API en 55000
   (espera 401, que es la respuesta sana), TCP 1514 y 1515, salud del clúster
-  del indexer (200 **y** cuerpo `green`) y página de acceso del panel (302).
-* **9 hostgroups**: `stack-database`, `stack-cache`, `stack-monitoring`,
-  `stack-web`, `stack-mail`, `stack-wazuh`, `stack-all`…
+  del indexer (200 **y** cuerpo `green`) y página de acceso del panel (302); y
+  los **3 del stack nuevo #2**: listener de Oracle en 1521, HTTP de la app en
+  8080 y **salud app+BD** (`/health`, que hace una consulta real).
+* **10 hostgroups**: `stack-database`, `stack-cache`, `stack-monitoring`,
+  `stack-web`, `stack-mail`, `stack-wazuh`, `stack-oracle`, `stack-all`…
 
 Cualquier servicio en fallo dispara una notificación por correo a los
 miembros de `icingaadmins`, que aterriza en Mailpit.
@@ -268,7 +271,7 @@ data* a InfluxDB 1.8, y **Grafana** que lo dibuja:
 ```
 
 El dashboard **«Icinga Stack — métricas de los servicios»** (carpeta *Icinga*)
-es la página de inicio de Grafana. Trae 22 paneles: carga por núcleo con los
+es la página de inicio de Grafana. Trae 25 paneles: carga por núcleo con los
 umbrales 1,5/3,0, estado de hosts y servicios, RTT y pérdida de paquetes por
 host, HTTP/TCP, disco, swap, procesos, latencia y duración de checks de
 Icinga 2, tráfico del API y MySQL (consultas/s, conexiones, hilos), la edad
@@ -282,6 +285,11 @@ respuesta HTTP de sus tres contenedores, tiempo de conexión a los puertos de
 agentes (1514/1515) y ping de los tres. Van con filtro propio
 `hostname =~ /wazuh/` y **no** con `$host`: son su panel y tienen que seguir
 viéndose cuando el filtro Host esté puesto en otro stack.
+
+Y una fila más (ids 23-25, `y=64`) es la del **stack nuevo #2**: respuesta HTTP
+de `/health` (la que consulta la base), tiempo de conexión a 1521 y 8080 y ping
+de sus dos contenedores. Mismo criterio: filtro propio
+`hostname =~ /oracle/`, independiente del filtro Host.
 
 ### Esquema en InfluxDB (ojo, no es el evidente)
 
@@ -459,14 +467,14 @@ pararlos dispararía alertas `CRITICAL` falsas a las 3 de la mañana.
 
 ### Probar que funciona de verdad
 
-`verify.ps1` hace **38 comprobaciones de copias** (66 en total), incluida una
+`verify.ps1` hace **36 comprobaciones de copias** (81 en total), incluida una
 **restauración** que compara el SHA256 de `README.md` y de `safety-net.ps1`
 recuperados con el original, **otra restauración de la copia de Wazuh** que
 hace lo mismo con su `docker-compose.yml` y su `wazuh.yml`, más el espejo del
 proyecto y la red de seguridad:
 
 ```powershell
-.\verify.ps1            # 66 checks, TOTAL FALLOS: 0
+.\verify.ps1            # 81 checks, TOTAL FALLOS: 0
 ```
 
 A mano:
@@ -494,7 +502,7 @@ inspeccionar el historial y probar la restauración con
 > Este procedimiento se ejecutó de verdad sobre producción el 4-oct-2026:
 > `docker compose down -v`, levantamiento limpio y restauración completa.
 > Resultado: **`verify.ps1` → TOTAL FALLOS: 0**. (El recuento de checks
-> crece con el tiempo — eran 44 en esa primera ejecución; hoy son 66.)
+> crece con el tiempo — eran 44 en esa primera ejecución; hoy son 81.)
 
 **Qué borra y qué sobrevive** a un `docker compose down -v`:
 
@@ -571,14 +579,18 @@ docker compose start icinga2 icingadb icinga-web
 
 ### `safety-net.ps1`: la red de seguridad
 
-Copia los 12 volúmenes como **`.tar` crudos** (se restauran con cualquier
-`tar -xf`, sin Duplicati) y el catálogo de Duplicati, que es lo que permite
-retomar las copias sin borrar el historial:
+Copia los 31 volúmenes (los **tres** stacks) como **`.tar` crudos** (se
+restauran con cualquier `tar -xf`, sin Duplicati) y el catálogo de Duplicati,
+que es lo que permite retomar las copias sin borrar el historial:
 
 ```powershell
 .\safety-net.ps1
-# C:\docker-backups\safety-net\  ->  12 .tar  (~400 MB)
+# C:\docker-backups\safety-net\  ->  31 .tar  (~3,5 GB)
 ```
+
+> El grueso es **`oracle_data`** (~3 GB, los datafiles de la base). El resto de
+> volúmenes (configuración y datos pequeños, sin los feeds CVE regenerables de
+> `wazuh_queue`) suma ~0,5 GB. Ver `Volume-TarArgs` en el script.
 
 Para el el stack 2-3 minutos. Ejecútala **antes de cualquier operación
 destructiva**.
@@ -595,9 +607,10 @@ tras cada `verify.ps1` (que lanza copias) o, como mínimo, con la misma
 frecuencia que los cambios importantes del stack.
 
 `verify.ps1` lo vigila en modo producción con 3 comprobaciones: que el
-destino de copias se lea del `compose`, que haya al menos 12 `.tar` y que
-`duplicati_config.tar` tenga menos de 7 días. Si alguna sale en FAIL, la
-vuelta es `.\safety-net.ps1 -SoloCatalogo` y volver a lanzar `verify`.
+destino de copias se lea del `compose`, que haya al menos 31 `.tar` (los
+volúmenes de los tres stacks) y que `duplicati_config.tar` tenga menos de 7
+días. Si alguna sale en FAIL, la vuelta es `.\safety-net.ps1 -SoloCatalogo` y
+volver a lanzar `verify`.
 No está en el clean-test a propósito: `safety-net.ps1` es una herramienta
 del host y una copia limpia no la tiene.
 
@@ -718,25 +731,31 @@ de núcleos, de modo que los umbrales de `hosts.conf` se leen **por núcleo**
 ## Verificación
 
 `verify.ps1` comprueba todo de una pasada y devuelve el número de fallos
-(login con credenciales reales, 9 hosts / 40 servicios en OK — incluidos los
-cinco `Backup - *` y los ocho de Wazuh —, los cuatro test del Director, dos
-notificaciones que tienen que acabar en Mailpit — una de `mariadb` y otra de
-un servicio de Wazuh —, que InfluxDB esté recibiendo métricas y Grafana tenga
-el datasource, el dashboard y los tres paneles de Wazuh provisionados, y **38
-comprobaciones de copias de seguridad** — volcado, alta declarativa,
+(login con credenciales reales, 11 hosts / 45 servicios en OK — incluidos los
+cinco `Backup - *`, los ocho de Wazuh y los tres del stack nuevo #2 —, los
+cuatro test del Director, dos notificaciones que tienen que acabar en Mailpit
+— una de `mariadb` y otra de un servicio de Wazuh —, que InfluxDB esté
+recibiendo métricas y Grafana tenga el datasource, el dashboard y los seis
+paneles de los stacks ajenos (tres de Wazuh, tres de Oracle) provisionados, y
+**36 comprobaciones de copias de seguridad** — volcado, alta declarativa,
 historial de Duplicati, lanzar una copia real, restaurar tres ficheros para
 compararlos, restaurar la copia de Wazuh y comparar los suyos, el espejo del
 proyecto y la red de seguridad):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\verify.ps1              # 66 checks
-powershell -ExecutionPolicy Bypass -File .\verify.ps1 -CleanTest   # 63 checks
+powershell -ExecutionPolicy Bypass -File .\verify.ps1              # 81 checks
+powershell -ExecutionPolicy Bypass -File .\verify.ps1 -CleanTest   # 68 checks
 # ===== TOTAL FALLOS: 0 =====
 ```
 
-> La diferencia de 3 son los comprobadores de **`safety-net`**: solo corren en
-> producción, porque `safety-net.ps1` es una herramienta del host y una copia
-> limpia no la tiene.
+> La diferencia de 13 son los comprobadores que **solo corren en producción**:
+> los 3 de **`safety-net`** (es una herramienta del host, y una copia limpia no
+> la tiene), los 5 de **Wazuh** y los 5 de la **app + Oracle** (son stacks
+> aparte y `mk-clean-test` no los clona). Además, en clean-test los hosts de
+> esos dos stacks existen como **objetos** (sus `.conf` se copian, y deben
+> parsear) pero sus contenedores no están en la red del clean-test, así que
+> aparecen siempre caídos: `verify.ps1` los **excluye del «todos en OK»** —sin
+> dejar de comprobar que su configuración se carga— solo en ese modo.
 
 > **Tras un reinicio del stack** los checks que se apoyan en `Uptime`
 > necesitan más de 60 s de vida del contenedor **y** un ciclo de chequeo
@@ -849,16 +868,22 @@ En cuanto el host existe, **las alertas por correo llegan solas** (el grupo
 `icingaadmins` ya está configurado) y las métricas del check van a InfluxDB.
 Lo único manual es añadir los paneles nuevos al dashboard de Grafana.
 
-Esto no es teórico: la Fase 2 lo aplicó al stack de Wazuh y el resultado está
-versionado en `icinga2-conf/conf.d/wazuh.conf` (tres hosts y cinco servicios,
-con `address` apuntando a `wazuh.manager` / `wazuh.indexer` /
-`wazuh.dashboard`, que son los nombres que llevan los certificados TLS del
-otro proyecto) y en los paneles 20-22 del dashboard.
+Esto no es teórico: se ha aplicado **dos veces** y el resultado está versionado.
+La Fase 2, al stack de Wazuh (`icinga2-conf/conf.d/wazuh.conf`: tres hosts y
+cinco servicios, con `address` apuntando a `wazuh.manager` / `wazuh.indexer` /
+`wazuh.dashboard`, que son los nombres que llevan sus certificados TLS), en los
+paneles 20-22. Y después, al **stack nuevo #2**, una app + Oracle
+(`icinga2-conf/conf.d/oracle.conf`: dos hosts y tres servicios, con `address`
+por nombre de servicio, `oracle-db` y `oracle-app`), en los paneles 23-25. En
+los dos casos, lo que importa no es «¿responde el puerto?» sino «¿responde la
+aplicación **usando su base de datos**?»: la sonda HTTP pega en un endpoint que
+consulta la BD de verdad.
 
-`verify.ps1` no se entera: comprueba `>= 9 hosts` y `>= 40 servicios`, o sea
+`verify.ps1` no se entera: comprueba `>= 11 hosts` y `>= 45 servicios`, o sea
 **mínimos**, no valores exactos. Además mira **por nombre** los tres hosts y
-los cinco servicios de Wazuh, porque solo con el recuento bastaría con que
-desapareciera uno y entrara otro distinto.
+los cinco servicios de Wazuh (y los dos hosts y tres servicios de Oracle),
+porque solo con el recuento bastaría con que desapareciera uno y entrara otro
+distinto.
 
 ### 2. Copias
 
@@ -920,6 +945,13 @@ que crezca mucho no arrastra a las demás.
 > respalda es **el volcado**, no el volumen. Si el stack nuevo tiene una base
 > de datos, se replica ese sidecar.
 
+> **Con Oracle** (stack nuevo #2) no hay `mysqldump`, así que el patrón se
+> invierte: en Duplicati se respalda **solo la declaración** (compose y app),
+> y los datafiles (`oracle_data`, ~3 GB) van **en frío**, en
+> `safety-net.ps1`, que para los tres stacks antes de copiar. Copiar un
+> datafile en caliente es el mismo error que copiar un datadir de MySQL en
+> caliente: la copia no sirve para restaurar.
+
 ### 4. Qué pasa cuando esto crezca
 
 Con uno o dos stacks extra, lo de arriba basta. Cuando ya sean varios,
@@ -950,10 +982,13 @@ roadmap.md                         fases 2-4: cuando toque crecer, con que
                                     criterio de hecho y que hay que ampliar
 verify.ps1                         comprobacion end-to-end
 mk-clean-test.ps1                  genera el proyecto aislado _clean-test/
-safety-net.ps1                     volcado plano de los 12 volumenes a .tar
+safety-net.ps1                     volcado plano de los 31 volumenes de los
+                                   tres stacks a .tar
 .gitattributes                     finales de linea: LF en .sh/.conf/.yml/
                                    Dockerfile, CRLF en .ps1 (ver "Repositorio
-                                   git": autocrlf=true los romperia)
+                                   git": autocrlf=true los romperia). Hay una
+                                   copia en la raiz del monorepo, que cubre
+                                   tambien wazuh-stack/ y oracle-stack/
 .gitignore                         lo que no se versiona: _clean-test/, tmp/,
                                    backups/ y los artefactos de herramientas
 
@@ -966,17 +1001,21 @@ backup/                            copias de seguridad (Duplicati)
                                    "Backup - *" (ver "Las copias, vigiladas
                                    en continuo")
   icinga-stack-backup.json         la copia de este stack (fuentes, retencion, plan)
-  wazuh-stack-backup.json          la copia del otro stack (Fase 2): su compose,
+  wazuh-stack-backup.json          la copia del stack de Wazuh (Fase 2): su compose,
                                    sus certificados TLS y su configuracion
+  oracle-stack-backup.json         la copia del stack nuevo #2: SOLO la declaracion
+                                   (compose y app); los datafiles van en la red de
+                                   seguridad, en frio (ver "Copias de seguridad")
 
 C:\docker-backups\                 DESTINO (OTRO DISCO FISICO, en C:)
   icinga-stack/                    dlist / dblock / dindex .zip  (Duplicati)
   wazuh-stack/                     lo mismo para el stack de Wazuh (Fase 2)
+  oracle-stack/                    lo mismo para el stack nuevo #2 (app + Oracle)
   project/                         espejo legible del proyecto (project-mirror)
-  safety-net/                      12 .tar crudos + el catalogo de Duplicati.
-                                   SOLO los volumenes de este stack: ampliarlo
-                                   a los 14 de Wazuh esta en la Fase 4 (ver
-                                   roadmap.md), no se ha adelantado.
+  safety-net/                      31 .tar crudos + el catalogo de Duplicati.
+                                   Los volumenes de los TRES stacks (el de
+                                   Wazuh incluye sus certificados y su cola;
+                                   el de Oracle, sus datafiles)
 
 mysql-init/                        solo en el primer arranque de un volumen
   00-mysql-settings.sql            log_bin_trust_function_creators
@@ -987,13 +1026,16 @@ icinga2-conf/                      montado en /etc/icinga2 (read-only)
   conf.d/hosts.conf                objeto Host NodeName + umbrales de carga
   conf.d/api-users.conf            ApiUser `icingaweb` con permisos "*"
   conf.d/stack-monitoring.conf     los 6 hosts y 32 servicios del propio stack,
-                                   8 hostgroups (stack-all ya incluye el rol
-                                   wazuh)
+                                   10 hostgroups (stack-all ya incluye los
+                                   roles wazuh y oracle)
   conf.d/wazuh.conf                Fase 2: los 3 hosts y 5 servicios del stack
                                    de Wazuh + hostgroup stack-wazuh. Montado
                                    con su propia linea en el compose: conf.d
                                    se monta fichero a fichero, un .conf nuevo
                                    sin montaje no aparece en el contenedor.
+  conf.d/oracle.conf               stack nuevo #2: los 2 hosts y 3 servicios de
+                                   la app + Oracle + hostgroup stack-oracle.
+                                   Mismo patron de montaje fichero a fichero.
   features-enabled/icingadb.conf   Icinga 2 -> Redis
   features-enabled/ido-mysql.conf  Icinga 2 -> MySQL `icinga2`
   features-enabled/influxdb.conf   Icinga 2 -> InfluxDB (perfdata)
@@ -1006,8 +1048,9 @@ web/
 grafana/
   provisioning/datasources/        datasource InfluxDB (uid icinga-influx)
   provisioning/dashboards/         donde se mira para cargar dashboards
-  dashboards/icinga-stack.json     el dashboard provisionado (22 paneles, los 3
-                                   ultimos del stack de Wazuh)
+  dashboards/icinga-stack.json     el dashboard provisionado (25 paneles, los 6
+                                   ultimos de los stacks ajenos: 3 de Wazuh y
+                                   3 del stack nuevo #2)
 
 tmp/                               sondas y benchmarks descartables
 ```
@@ -1056,10 +1099,16 @@ LF → CRLF al hacer checkout. Para los `.sh` eso es letal: se ejecutan con
 rechaza con `sh: 1: ...: \r: command not found`.
 
 Una regla explícita de `.gitattributes` manda sobre `autocrlf`, así que
-fija **LF** en `.sh`, `.conf`, `.yml`, `.json`, `.sql`, `.md` y el
+fija **LF** en `.sh`, `.conf`, `.yml`, `.json`, `.sql`, `.md`, `.py` y el
 `Dockerfile` — que no lleva extensión, así que autocrlf no lo trata como
 texto y lo pasaría a CRLF sin más, con las líneas `RUN` dentro — y
 **CRLF** en los `.ps1`, que es lo habitual en Windows.
+
+El repositorio es un **monorepo**: cuando entraron `wazuh-stack` (con su
+`regen-dashboard-cert.sh`) y `oracle-stack` (con su `Dockerfile`), las mismas
+reglas se pusieron **también en la raíz** (`\.gitattributes`), que es la que
+cubre a los tres stacks. La copia de `icinga-stack/` se conserva porque el
+fichero más específico es el que manda, y las dos coinciden.
 
 La prueba no es leerse el fichero, es clonar y mirar los bytes:
 

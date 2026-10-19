@@ -1,10 +1,11 @@
 # Wazuh Stack
 
 **Wazuh 4.14.8 (single node)** — SIEM y seguridad: FIM sobre la declaracion de
-los dos proyectos, y recoleccion de lo que imprimen los contenedores del
+los tres proyectos, y recoleccion de lo que imprimen los contenedores del
 icinga-stack.
 
-Es el **primer stack ajeno** al de monitorizacion (la "Fase 2" del roadmap de
+Es el **primer stack ajeno** al de monitorizacion (hoy hay un segundo,
+`oracle-stack`: una app + Oracle) (la "Fase 2" del roadmap de
 `icinga-stack`). Se separa en directorio y proyecto propios (`D:\docker\wazuh-stack`)
 y solo se cuelga de la red externa `monitoring-net`, que es el gancho que deja
 preparado `icinga-stack` para conectar proyectos nuevos **sin tocar nada alla**.
@@ -89,12 +90,12 @@ Wazuh tiene dos agentes y **no se pisan**: cada uno vigila algo distinto.
 
 | Agente | Nombre | Vigila | Daemon |
 |---|---|---|---|
-| `wazuh.agent` | `docker-stacks` | LOS **FICHEROS** de ambos proyectos (`/mon/icinga-stack`, `/mon/wazuh-stack`) | syscheck (FIM) |
+| `wazuh.agent` | `docker-stacks` | LOS **FICHEROS** de los tres proyectos (`/mon/icinga-stack`, `/mon/wazuh-stack`, `/mon/oracle-stack`) | syscheck (FIM) |
 | `wazuh.agent.icinga` | `icinga-stacks` | LO QUE LOS **CONTENEDORES IMPRIMEN** (stdout) | logcollector |
 
 * **`docker-stacks`** (FIM): el ojo de seguridad sobre el codigo declarativo.
   Deja registro de **quien** cambia una linea de la infraestructura y **cuando**.
-  `check_all=yes` + `report_changes=yes` sobre los dos arboles de proyecto.
+  `check_all=yes` + `report_changes=yes` sobre los tres arboles de proyecto.
 
 * **`icinga-stacks`** (logs): lee `/var/lib/docker/containers/*/*-json.log` con
   `log_format=json` y sigue el puntero de cada fichero en vivo (lo que un

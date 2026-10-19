@@ -1,9 +1,9 @@
 <#
  .SYNOPSIS
-   Copia plana y legible de TODOS los volumenes de LOS DOS stacks
-   (icinga-stack + wazuh-stack) en C:\docker-backups\safety-net\.
-   Para ambos stacks unos minutos, en UNA sola ventana, para que el
-   volcado sea consistente.
+   Copia plana y legible de TODOS los volumenes de LOS TRES stacks
+   (icinga-stack + wazuh-stack + oracle-stack) en
+   C:\docker-backups\safety-net\. Para los tres stacks unos minutos, en UNA
+   sola ventana, para que el volcado sea consistente.
 
    -SoloCatalogo   refresca SOLO duplicati_config.tar (de icinga-stack).
                    Para unicamente el contenedor Duplicati (~15 s en vez de
@@ -41,17 +41,19 @@ $ErrorActionPreference = 'Stop'
 
 $dest = 'C:\docker-backups\safety-net'
 
-# Los DOS stacks que hoy tiene el proyecto. Cada uno es un proyecto compose
+# Los TRES stacks que hoy tiene el proyecto. Cada uno es un proyecto compose
 # proprio con su propio prefijo de volumenes (nombre <proyecto>_<volumen>).
-# El script vive dentro de icinga-stack; wazuh-stack es un hermano.
+# El script vive dentro de icinga-stack; los otros son hermanos.
 $icingaDir = $PSScriptRoot
 $wazuhDir  = (Resolve-Path (Join-Path $PSScriptRoot '..\wazuh-stack')).Path
+$oracleDir = (Resolve-Path (Join-Path $PSScriptRoot '..\oracle-stack')).Path
 $stacks = @(
     @{ name = 'icinga-stack'; dir = $icingaDir; prefix = 'icinga-stack_' },
-    @{ name = 'wazuh-stack';  dir = $wazuhDir;  prefix = 'wazuh-stack_'  }
+    @{ name = 'wazuh-stack';  dir = $wazuhDir;  prefix = 'wazuh-stack_'  },
+    @{ name = 'oracle-stack'; dir = $oracleDir; prefix = 'oracle-stack_' }
 )
 
-Write-Output "=== RED DE SEGURIDAD: volcado de volumenes (icinga + wazuh) ==="
+Write-Output "=== RED DE SEGURIDAD: volcado de volumenes (icinga + wazuh + oracle) ==="
 
 New-Item -ItemType Directory -Path $dest -Force | Out-Null
 
@@ -98,7 +100,7 @@ if ($SoloCatalogo) {
     return
 }
 
-# Lista los volumenes de LOS DOS stacks ANTES de parar: `docker compose stop`
+# Lista los volumenes de LOS TRES stacks ANTES de parar: `docker compose stop`
 # los dejaria igual (no lleva -v) pero asi se documenta exactamente que se copio.
 $allVols = @()
 foreach ($s in $stacks) {
@@ -115,10 +117,10 @@ Write-Output "  total: $($allVols.Count) volumenes"
 Get-ChildItem -Path $dest -Filter '*.tar' -File -ErrorAction SilentlyContinue |
     Remove-Item -Force
 
-# Se paran AMBOS stacks (ventana unica de mantenimiento; sin -v, los
+# Se paran TODOS los stacks (ventana unica de mantenimiento; sin -v, los
 # volumenes quedan). Asi el snapshot es consistente y no hay cruces de
 # alertas (si solo se parara Wazuh, Icinga estaria vivo y lo alertaria).
-Write-Output "  parando ambos stacks..."
+Write-Output "  parando los stacks..."
 foreach ($s in $stacks) {
     Push-Location $s.dir
     try {
@@ -133,7 +135,7 @@ try {
     foreach ($v in $allVols) {
         # El .tar se nombra por el volumen SIN el prefijo de proyecto (igual
         # que siempre hizo icinga: db_data.tar, duplicati_config.tar, ...).
-        # Los dos stacks no comparten nombres logicos, asi que no hay colision.
+        # Los tres stacks no comparten nombres logicos, asi que no hay colision.
         $tarname = $v
         foreach ($s in $stacks) { if ($v.StartsWith($s.prefix)) { $tarname = $v.Substring($s.prefix.Length) } }
         Copy-Volume $v $tarname (Volume-TarArgs $v)

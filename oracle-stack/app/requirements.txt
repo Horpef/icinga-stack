@@ -1,0 +1,7 @@
+# App minima a proposito: tres piezas y ninguna mas.
+#   Flask       -> el servidor HTTP
+#   oracledb    -> cliente Oracle en modo THIN (no necesita Oracle Client)
+#   cryptography-> lo exige oracledb thin para el cifrado de la sesion
+Flask==3.0.3
+oracledb==2.4.1
+cryptography==43.0.1

@@ -1,0 +1,145 @@
+# ---------------------------------------------------------------------------
+# oracle-stack -- app + Oracle Database Free 23ai (todo en contenedores)
+#
+# Tercer stack del proyecto, hermano de icinga-stack y wazuh-stack. Es el
+# primer "app que se monitoriza": una base de datos Oracle y una app que la
+# usa, las dos en contenedores, colgadas de la red externa `monitoring-net`
+# (el gancho que deja icinga-stack para sumar proyectos sin tocar nada alli).
+#
+# Se da de alta en Icinga por fichero (icinga-stack/icinga2-conf/conf.d/oracle.conf),
+# igual que se hizo con Wazuh en la Fase 2.
+#
+# La BD NO publica puertos: al unirse a `monitoring-net`, Icinga ve los
+# contenedores por su nombre de servicio (oracle-db / oracle-app) y sondea
+# ahi. Exponer 1521 a la LAN no aportaria nada y abriria la base.
+#
+# La app SI publica su HTTP, pero SOLO en loopback (127.0.0.1:18081), igual
+# que el resto de UIs del proyecto: para poder verla en el navegador y para
+# que verify.ps1 la sondee con curl.exe desde el host. La BD sigue sin
+# exponerse.
+# ---------------------------------------------------------------------------
+
+# Driver json-file EXPLICITO y acotado (10 MB x 3), por el mismo motivo que en
+# icinga-stack: el driver `local` por defecto de Docker Desktop escribe en
+# binario comprimido y un lector externo (el logcollector de Wazuh,
+# `icinga-stacks`) solo veria bytes ilegibles. Con json-file, los contenedores
+# de este stack entran SOLOS en el logcollector (el wildcard
+# /var/lib/docker/containers/*/*-json.log) sin tocar su configuracion.
+x-logging: &json-logs
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+
+  # --- base de datos: Oracle Database Free 23ai -----------------------------
+  # Imagen `gvenzl/oracle-free` (variante slim): Oracle Free 23ai, libre de
+  # licencia para uso sin limites de produccion, pensada para contenedores
+  # (a diferencia de la imagen oficial, NO necesita privilegios ni kernel
+  # params). Crea sola un PDB llamado FREEPDB1 y, con APP_USER, un usuario de
+  # aplicacion.
+  #
+  # 23ai Free necesita bastante RAM: se le da un tope de 2 GB (el SGA/PGA se
+  # autoconfigura por debajo). El equipo tiene 7,7 GB en la VM de Docker y el
+  # stack de Wazuh ya tiene reservados ~5,3 GB en limites, asi que este es el
+  # valor que hay que vigilar primero si algo empieza a ir justo.
+  oracle-db:
+    logging: *json-logs
+    image: gvenzl/oracle-free:23-slim
+    container_name: oracle-db
+    hostname: oracle-db
+    environment:
+      # Contrasena de SYS/SYSTEM (y de las cuentas administrativas).
+      ORACLE_PASSWORD: oracle_root_pw
+      # Usuario de aplicacion y su contrasena: los crea el entrypoint en el
+      # PDB. Es quien usa `oracle-app` para conectar (nunca SYS desde la app).
+      APP_USER: APP
+      APP_USER_PASSWORD: app_pass
+      # OJO, GOTCHA MEDIDO (no volver a ponerlo): NO se fija ORACLE_DATABASE.
+      # El entrypoint ya crea FREEPDB1 por defecto al construir el CDB; si
+      # ademas se declara ORACLE_DATABASE=FREEPDB1, intenta crearla una
+      # SEGUNDA vez, falla con ORA-65012 (pluggable database already exists),
+      # deja el flag de fase /opt/oracle/hc-pdb-create puesto -> el
+      # healthcheck devuelve 3 (unhealthy) para siempre, y APP_USER nunca
+      # llega a crearse. Sintoma: PDB FREEPDB1 en READ WRITE pero
+      # `select username from cdb_users where username='APP'` = no rows (ojo:
+      # en el root, `dba_users` tampoco lo lista: APP es un usuario LOCAL del
+      # PDB, no comun).
+      # La cadena de conexion sigue siendo oracle-db:1521/FREEPDB1 porque
+      # FREEPDB1 es el nombre por defecto del PDB.
+    volumes:
+      # Los ficheros de la BD (datafiles, redo, control). Permanent.
+      - oracle_data:/opt/oracle/oradata
+    # Oracle mapea parte de su memoria a /dev/shm; con el default de Docker
+    # (64 MB) el arranque puede fallar con ORA-00845. 1 GB de tmpfs (solo
+    # consume RAM si se usa). No hace falta `ipc: host` ni privileged.
+    shm_size: 1g
+    mem_limit: 2g
+    networks:
+      - monitoring-net
+    restart: unless-stopped
+    healthcheck:
+      # Script que trae la propia imagen: usa sqlplus, abre el PDB y hace un
+      # SELECT 1. Es la prueba de que la BD ACEPTA CONSULTAS, no solo de que
+      # el proceso vive. El primer arranque crea la base entera (varios
+      # minutos): de ahi el start_period largo.
+      test: ["CMD", "/opt/oracle/healthcheck.sh"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 600s
+
+  # --- aplicacion: usa la BD y expone su salud ------------------------------
+  # App Flask minima con `python-oracledb` en modo thin (sin Oracle Client):
+  # crea una tabla `heartbeat` si no existe, inserta un latido cada 15 s y
+  # publica:
+  #   GET /health -> SELECT 1 FROM DUAL  -> 200 "ok" (o 500 si la BD no va)
+  #   GET /       -> JSON con contador de latidos y PDB
+  # El /health es una prueba E2E de app+BD: Icinga la sondea por HTTP y, si la
+  # BD no responde, el check cae aunque el proceso de la app siga vivo.
+  oracle-app:
+    logging: *json-logs
+    build:
+      context: ./app
+    image: oracle-stack-app:latest
+    container_name: oracle-app
+    hostname: oracle-app
+    ports:
+      # Solo loopback, como el resto de UIs (nunca 0.0.0.0). 18081 queda fuera
+      # del rango ya ocupado por los otros stacks: 8080 web, 3000 grafana,
+      # 8200 duplicati, 8025 mailpit, 5601 wazuh, 18200/18080 el clean-test.
+      - "127.0.0.1:18081:8080"
+    environment:
+      DB_USER: APP
+      DB_PASSWORD: app_pass
+      # Service name del compose (oracle-db) + PDB: misma forma que
+      # `sqlplus APP/app_pass@oracle-db:1521/FREEPDB1`.
+      DB_DSN: oracle-db:1521/FREEPDB1
+    depends_on:
+      # No arranca hasta que la BD acepta consultas; el codigo ademas
+      # reintenta, asi que ni con un PDB lento se queda a medias.
+      oracle-db:
+        condition: service_healthy
+    mem_limit: 256m
+    networks:
+      - monitoring-net
+    restart: unless-stopped
+    healthcheck:
+      # La imagen slim de Python no trae curl ni wget; se usa el propio
+      # interprete con urllib (urlopen lanza excepcion en un 500 -> falla).
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health').status==200 else 1)\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  oracle_data:
+
+# Red externa compartida con el resto del proyecto (la crea una sola vez el
+# README de icinga-stack: `docker network create monitoring-net`).
+networks:
+  monitoring-net:
+    external: true
+    name: monitoring-net

@@ -10,9 +10,9 @@ Cada fase tiene un **criterio de hecho**, que es lo único que la distingue de
 hace falta, no antes: la tentación de adelantar trabajo que nadie ha pedido
 es la forma más común de estancarse.
 
-**Estado: Fases 1 y 2 completas.** La 3 (romper cosas a propósito para
-calibrar umbrales y tiempos) es la siguiente; la 4 espera a que el crecimiento
-la justifique.
+**Estado: Fases 1 y 2 completas, más un segundo stack ajeno (app + Oracle).**
+La 3 (romper cosas a propósito para calibrar umbrales y tiempos) es la
+siguiente; la 4 espera a que el crecimiento la justifique.
 
 ---
 
@@ -84,6 +84,43 @@ eso.
 **Criterio de hecho**: un stack ajeno aparece en Icinga, dispara una
 notificación que acaba en Mailpit, y tiene su panel en Grafana.
 
+## Stack nuevo #2 · App + Oracle (✅, 2026-10-19)
+
+**Cuándo**: la continuación natural de la Fase 2 — «ir sumando app para
+monitorizar». Segunda app ajena, esta vez **con base de datos y todo en
+contenedores** (nada fuera de Docker).
+
+Es una **app Flask** mínima + **Oracle Database Free 23ai**
+(`D:\docker\oracle-stack`), colgada de `monitoring-net` como Wazuh. El objetivo
+no es la app (es deliberadamente tonta) sino tener una **cadena app→BD de
+verdad** que monitorizar: `/health` ejecuta un `SELECT 1 FROM DUAL`, de modo que
+el servicio se pone CRITICAL si la base cae **aunque el proceso de la app siga
+vivo** — la diferencia que un chequeo de puerto no ve.
+
+| Qué toca | Cómo | Estado |
+|---|---|---|
+| Nuevo stack | `oracle-stack/`: `oracle-db` (gvenzl/oracle-free 23ai *slim*) + `oracle-app` (Flask + `oracledb` thin) | ✅ |
+| Darlo de alta en Icinga | `conf.d/oracle.conf`: 2 hosts, 3 servicios (+2 `ping4`) | ✅ |
+| Panel en Grafana | ids 23-25, con filtro propio `hostname =~ /oracle/` | ✅ |
+| Copias | `backup/oracle-stack-backup.json` (solo declaración) + `oracle_data` en safety-net (en frío) | ✅ |
+| Wazuh | FIM `/mon/oracle-stack`; logs por el driver `json-file` (entran solos) | ✅ |
+| `verify.ps1` | sección 9: contenedores, `/health` con consulta real y que el `HEARTBEAT` **crezca** | ✅ |
+
+**Criterio de hecho cumplido** — y comprobado, no deducido:
+
+- **Aparece en Icinga**: 11 hosts y 45 servicios; los 5 nuevos (`listener 1521`,
+  `HTTP 8080`, `Salud app+BD`, más dos `ping4`) en **OK**.
+- **La cadena app→BD es real**: `/health` responde `ok` (hace `SELECT 1 FROM
+  DUAL`) y el contador de `HEARTBEAT` **crece** entre dos lecturas separadas
+  (la app escribe sola cada 15 s).
+- **Copia declarativa**: Duplicati la da de alta sola (ID 3) y la primera
+  ejecución termina bien.
+
+**Gotcha medido** (documentado en el compose y en `oracle-stack/README.md`):
+fijar `ORACLE_DATABASE: FREEPDB1` hace que el entrypoint intente crear un PDB
+que **ya** crea por defecto → `ORA-65012` → healthcheck `3` (unhealthy) para
+siempre y `APP_USER` **sin crear**. **No se fija**: el default ya es `FREEPDB1`.
+
 ## Fase 3 · Entender a fondo, rompiendo umbrales
 
 **Cuándo**: nada más cerrar la fase 2 — se aprende sobre stack propio, no en
@@ -139,6 +176,10 @@ qué haces cuando llega, y qué prueba la está vigilando a ella.
 | `safety-net.ps1` ampliado a **ambos stacks** (30 volúmenes) | Antes solo volcaba `icinga-stack`. Ahora volca los 12 de icinga + los 18 de wazuh en **una sola ventana** (se paran los dos stacks juntos, sin `-v`, para que el snapshot sea consistente y no haya cruces de alertas Icinga↔Wazuh). Trato especial para `wazuh_queue`: contiene los feeds CVE de Vulnerability Detector en `vd/` + `vd_updater/` (**12,5 GB**) que el updater vuelve a bajarse solos cada 60 min (`feed-update-interval=60m`); se vuelcan con `tar --exclude=vd --exclude=vd_updater` → tar de 13 MB en vez de 12 GB (verificado con el volumen real). Los `.tar` se nombran sin el prefijo de proyecto (`db_data.tar`, `wazuh_etc.tar`, …); los dos stacks no comparten nombres lógicos, así que no hay colisión. Verificado 2026-10-16: 30 `.tar`, 514 MB, ambos stacks healthy tras el arranque |
 | UIs solo en **`127.0.0.1`** (2026-10-16) | Grafana (3000), Duplicati (8200), Mailpit (8025 panel + 1025 SMTP), Icinga Web (8080/8443) y Wazuh Dashboard (5601) pasan de `0.0.0.0` a `127.0.0.1`: son **paneles para el operador local**, no servicios de red; exponerlos a `0.0.0.0` los abría a toda la LAN sin necesidad. Siguen en `0.0.0.0` los puertos de **servicio**: 5665 (API de Icinga, la usa verify.ps1) y 1514/1515/55000 (Wazuh). verify.ps1 accede por `localhost` → sigue pasando. Si algún día se necesita la UI desde otro equipo, hay que quitar el `127.0.0.1` de ese puerto |
 | Check **8c** de `verify.ps1` endurecido (2026-10-17) | El check contaba las líneas `Analyzing file` del `ossec.log` del agente, pero `logrotate` hace **copytruncate** a medianoche UTC (no deja ni `.1`) y se las lleva, aunque el logcollector siga trabajando → `0/13` y **falso FALLO** (salió al verificar el 2026-10-17 tras reiniciar Docker; la **sonda E2E ya probaba** que el logcollector funcionaba). Se comprobó que **SIGHUP NO re-emite** (`kill -HUP` al logcollector deja el conteo igual), pero **`wazuh-control reload` sí** (reinicia logcollector/syscheckd/modulesd/execd **sin tocar `agentd`** → el agente no se desconecta; 13→26). El check ahora fuerza ese reload y sondea el conteo (tope 25 s) antes de evaluar. Validado truncando el `ossec.log` a 0: el check se recupera solo |
+| Stack nuevo #2 (`oracle-stack`): app + Oracle, **todo en contenedores** (2026-10-19) | Tercera pata del proyecto. Icinga la ve por `monitoring-net` (**sin publicar la BD**); la app sí publica su HTTP en `127.0.0.1:18081` (para verla en el navegador y para que `verify.ps1` la sondee con `curl.exe` — pasar código Python por `docker exec` se rompe con las comillas de PowerShell). Oracle se acota con `mem_limit: 2g` + `shm_size: 1g` porque la VM tiene ~7,7 GB y Wazuh ya reserva ~5,3 GB en límites. Su copia en Duplicati es **solo la declaración**: los datafiles de una BD **no** se copian en caliente (copia inconsistente); el volumen `oracle_data` lo vuelca `safety-net.ps1`, que **para los stacks** (copia en frío). `safety-net.ps1` pasa así a **3 stacks (31 volúmenes)** |
+| El gotcha de `ORACLE_DATABASE` (documentado, 2026-10-19) | `ORACLE_DATABASE: FREEPDB1` **rompe** el arranque: el entrypoint ya crea `FREEPDB1` por defecto y, declarado, intenta una segunda creación que falla con `ORA-65012`; deja el flag `/opt/oracle/hc-pdb-create` → healthcheck **`3` (unhealthy) para siempre** y `APP_USER` **sin crear**. Síntoma: el PDB está en `READ WRITE` pero `select username from cdb_users where username='APP'` sale vacío (ojo: `dba_users` del root tampoco lo lista, es un usuario **local** del PDB). Se deja el default. Ver `oracle-stack/README.md` |
+| `verify.ps1`: en clean-test los stacks ajenos entran como **objetos** pero se **excluyen del «todos en OK»** (2026-10-19) | Los `.conf` de Wazuh/Oracle se copian enteros en el clean-test (y deben: así se valida que parsean en `icinga2 daemon -C`), pero sus contenedores viven en `monitoring-net`, red que el clean-test **no comparte** → sus checks caen siempre y no es un fallo del stack que se prueba. Los recuentos suben a **11 hosts / 45 servicios** (iguales en los dos modos, porque los `.conf` se cargan en ambos) y, **solo en clean-test**, se filtran esos 5 hosts del «todos en OK» |
+| Montar un fichero que aún no existe → Docker crea un **directorio** (2026-10-19) | Al montar `D:/docker/oracle-stack/README.md` en Duplicati **antes** de crear el fichero, Docker creó un **directorio** con ese nombre en el host; el montaje quedó «pegado» a un directorio y al escribir el fichero el contenedor ya no arrancaba (`not a directory`). Moraleja: **crear el fichero antes** de declarar su `volumes:`/`Sources`, o recrear el contenedor con `--force-recreate` (el `up -d` normal reutiliza el contenedor viejo y sigue fallando) |
 
 ## Qué hay que ampliar cuando entre un stack nuevo
 
@@ -150,3 +191,14 @@ qué haces cuando llega, y qué prueba la está vigilando a ella.
    contra el servidor
 4. **`mk-clean-test.ps1`** — la lista de ficheros que copia; si falta uno,
    Docker crea en su lugar un directorio vacío y los orígenes se rompen
+5. **`icinga2-conf/conf.d/<stack>.conf`** — su línea de montaje (fichero a
+   fichero) en el compose de `icinga-stack`, y validar con
+   `icinga2 daemon -C` **antes** de recrear el contenedor. Los servicios del
+   stack ajeno, en **clean-test**, hay que excluirlos del «todos en OK» (ver
+   `verify.ps1`, sección 2): existen como objetos, pero sus contenedores no
+   están en la red del clean-test
+6. **OJO con montar ficheros que aún no existen**: al declarar el `volumes:` de
+   Duplicati para un fichero de primer nivel, **créalo antes** — Docker crea en
+   su lugar un **directorio** con ese nombre y el montaje se queda roto
+   (`not a directory`); el `up -d` normal reutiliza el contenedor viejo, hace
+   falta `--force-recreate`

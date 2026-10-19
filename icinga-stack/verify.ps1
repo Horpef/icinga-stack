@@ -79,10 +79,14 @@ try {
   $jh = "$env:TEMP\verify_hosts.json"; $js = "$env:TEMP\verify_svc.json"
   curl.exe -sk -u "icingaweb:icingaweb123" -H "Accept: application/json" "$api/v1/objects/hosts" -o $jh | Out-Null
   $hosts = @((Get-Content $jh -Raw | ConvertFrom-Json).results)
-  Check "API: >= 9 hosts" ($hosts.Count -ge 9) $hosts.Count
+  # Los stacks ajenos (Wazuh = nuevo #1, Oracle = nuevo #2) se dan de alta por
+  # fichero de conf (conf.d), no por Director, asi que SUS hosts/servicios
+  # cuentan en los dos modos (el mk-clean-test copia conf.d entera). De ahi el
+  # minimo de 11 hosts / 45 servicios, igual en produccion y en clean-test.
+  Check "API: >= 11 hosts" ($hosts.Count -ge 11) $hosts.Count
   curl.exe -sk -u "icingaweb:icingaweb123" -H "Accept: application/json" "$api/v1/objects/services" -o $js | Out-Null
   $services = @((Get-Content $js -Raw | ConvertFrom-Json).results)
-  Check "API: >= 40 servicios" ($services.Count -ge 40) $services.Count
+  Check "API: >= 45 servicios" ($services.Count -ge 45) $services.Count
 
   # Los cinco servicios que vigilan las copias (seccion 6 y
   # icinga2-conf/conf.d/stack-monitoring.conf). Se comprueban por nombre y
@@ -133,7 +137,36 @@ try {
         $(if ($wzFS.Count -eq 0) { 'los 5 presentes' }
           else { "faltan: $($wzFS -join ', ')" })
 
-  $bad = @($services | Where-Object { $_.attrs.state -ne 0 })
+  # Los dos hosts y los tres servicios del stack nuevo #2 (app + Oracle).
+  # Mismo criterio: por nombre y no solo por recuento.
+  $orEsperados = @('oracle-db', 'oracle-app')
+  $orHay = @($hosts | ForEach-Object { $_.attrs.__name })
+  $orFaltan = @($orEsperados | Where-Object { $_ -notin $orHay })
+  Check "API: 2 hosts del stack Oracle dados de alta" `
+        ($orFaltan.Count -eq 0) `
+        $(if ($orFaltan.Count -eq 0) { 'oracle-db, oracle-app' }
+          else { "faltan: $($orFaltan -join ', ')" })
+
+  $orServicios = @(
+    'oracle-db!Oracle DB - Listener (1521)',
+    'oracle-app!Oracle App - HTTP (8080)',
+    'oracle-app!Oracle App - Salud app+BD'
+  )
+  $orFS = @($orServicios | Where-Object { $_ -notin $hay })
+  Check "API: 3 servicios del stack Oracle (listener, HTTP, salud app+BD)" `
+        ($orFS.Count -eq 0) `
+        $(if ($orFS.Count -eq 0) { 'los 3 presentes' }
+          else { "faltan: $($orFS -join ', ')" })
+
+  # En clean-test los stacks ajenos existen como OBJETOS (sus .conf se cargan y
+  # deben parsear) pero sus contenedores viven en monitoring-net, red que el
+  # clean-test NO comparte: sus checks caen siempre y no es un fallo del stack
+  # que se prueba. Se excluyen del "todos en OK" SOLO en clean-test.
+  $ajenos = @()
+  if ($CleanTest) {
+    $ajenos = @('wazuh-dashboard', 'wazuh-indexer', 'wazuh-manager', 'oracle-db', 'oracle-app')
+  }
+  $bad = @($services | Where-Object { $_.attrs.state -ne 0 -and $_.attrs.host_name -notin $ajenos })
 
   # Tras un reinicio del stack los checks tardan en asentarse: los que se
   # apoyan en `Uptime` necesitan mas de 60 s de vida del contenedor Y un
@@ -147,7 +180,7 @@ try {
     Start-Sleep -Seconds 15
     curl.exe -sk -u "icingaweb:icingaweb123" -H "Accept: application/json" "$api/v1/objects/services" -o $js | Out-Null
     $services = @((Get-Content $js -Raw | ConvertFrom-Json).results)
-    $bad = @($services | Where-Object { $_.attrs.state -ne 0 })
+    $bad = @($services | Where-Object { $_.attrs.state -ne 0 -and $_.attrs.host_name -notin $ajenos })
   }
 
   Check "API: todos los servicios en OK" ($bad.Count -eq 0) `
@@ -255,6 +288,9 @@ try {
   Check "InfluxDB: los 3 hosts de Wazuh salen en la variable Host de Grafana" `
         (($tj -match 'wazuh-manager') -and ($tj -match 'wazuh-indexer') -and ($tj -match 'wazuh-dashboard')) `
         $ts.Substring(0, [Math]::Min(200, $ts.Length))
+  Check "InfluxDB: los 2 hosts de Oracle salen en la variable Host de Grafana" `
+        (($tj -match 'oracle-db') -and ($tj -match 'oracle-app')) `
+        $ts.Substring(0, [Math]::Min(200, $ts.Length))
 } catch { Check "InfluxDB" $false $_.Exception.Message }
 
 try {
@@ -268,15 +304,15 @@ try {
   $db = Invoke-WebRequest "$graf/api/search?type=dash-db" -Headers $ga -UseBasicParsing -TimeoutSec 30
   Check "Grafana: dashboard provisionado" ($db.Content -match '"uid":"icinga-stack"') $db.Content
 
-  # El dashboard trae 22 paneles (los 19 de la Fase 1 y los 3 del stack
-  # Wazuh). Se comprueba por id, no solo el recuento: con un panel menos y
-  # otro de mas el recuento seguira cuadrando. Se lee de la API (lo que
-  # Grafana sirve), no del JSON.
+  # El dashboard trae 25 paneles (los 19 de la Fase 1, los 3 del stack Wazuh y
+  # los 3 del stack nuevo #2 de Oracle). Se comprueba por id, no solo el
+  # recuento: con un panel menos y otro de mas el recuento seguira cuadrando.
+  # Se lee de la API (lo que Grafana sirve), no del JSON.
   $dbf = Invoke-WebRequest "$graf/api/dashboards/uid/icinga-stack" -Headers $ga -UseBasicParsing -TimeoutSec 30
   $dp  = @(($dbf.Content | ConvertFrom-Json).dashboard.panels)
   $hbp = @($dp | Where-Object { $_.id -eq 19 -and $_.title -like "*Icinga DB*" })
-  Check "Grafana: 22 paneles y el de Icinga DB presente" `
-        ($dp.Count -ge 22 -and $hbp.Count -eq 1) `
+  Check "Grafana: 25 paneles y el de Icinga DB presente" `
+        ($dp.Count -ge 25 -and $hbp.Count -eq 1) `
         "$($dp.Count) paneles; panel 19 de Icinga DB: $($hbp.Count)"
 
   # La tercera pata del criterio de hecho de la Fase 2: "tiene su panel en
@@ -289,6 +325,15 @@ try {
   Check "Grafana: panel del stack Wazuh (id 20) con filtro propio hostname =~ /wazuh/" `
         (($wzp.Count -eq 1) -and ($wzq -match 'hostname"\s*=~\s*/wazuh/')) `
         "$($wzp.Count) panel(es) :: $wzq"
+
+  # Cuarta pata del criterio del stack nuevo #2 ("tiene su panel en Grafana"),
+  # con el mismo rigor: se mira el filtro, no solo que el panel exista.
+  $orp = @($dp | Where-Object { $_.id -eq 23 -and $_.title -like "Oracle*" })
+  $orq = ''
+  if ($orp.Count -gt 0) { $orq = @($orp[0].targets)[0].query }
+  Check "Grafana: panel del stack Oracle (id 23) con filtro propio hostname =~ /oracle/" `
+        (($orp.Count -eq 1) -and ($orq -match 'hostname"\s*=~\s*/oracle/')) `
+        "$($orp.Count) panel(es) :: $orq"
 } catch { Check "Grafana" $false $_.Exception.Message }
 
 # --- 6. Copias de seguridad -------------------------------------------------
@@ -632,7 +677,7 @@ try {
     if ($snDir -ne '') {
       $sn = Join-Path ($snDir -replace '/', '\') 'safety-net'
       $tars = @(Get-ChildItem -LiteralPath $sn -Filter '*.tar' -File -ErrorAction SilentlyContinue)
-      Check "safety-net: al menos 12 .tar (volumenes del stack)" ($tars.Count -ge 12) "$($tars.Count) en $sn"
+      Check "safety-net: al menos 31 .tar (los volumenes de los tres stacks)" ($tars.Count -ge 31) "$($tars.Count) en $sn"
 
       $cat = Join-Path $sn 'duplicati_config.tar'
       $h = -1.0
@@ -734,6 +779,46 @@ if (-not $CleanTest) {
     }
     Check "Wazuh: sonda E2E con 'error' vuelve como alerta 100100" ($zhits -ge 1) "marcador=$zmark en $zt s"
   } catch { Check "Wazuh" $false $_.Exception.Message }
+}
+
+# --- 9. App + Oracle (stack nuevo #2) ----------------------------------------
+# Solo en produccion: oracle-stack es un proyecto aparte (mk-clean-test no lo
+# clona) y sus contenedores no existen en clean-test; mismo criterio que la
+# seccion 8 (Wazuh). No se repite aqui la comprobacion de que Icinga ve los
+# hosts/servicios (eso es la seccion 2); lo que se prueba es el stack EN SI.
+if (-not $CleanTest) {
+  try {
+    $oh = (docker inspect oracle-db --format '{{.State.Health.Status}}' 2>&1) -join " "
+    Check "oracle-db: contenedor healthy" ($oh.Trim() -eq "healthy") $oh
+    $ah = (docker inspect oracle-app --format '{{.State.Health.Status}}' 2>&1) -join " "
+    Check "oracle-app: contenedor healthy" ($ah.Trim() -eq "healthy") $ah
+
+    # healthcheck.sh de la propia imagen: usa sqlplus y comprueba que FREEPDB1
+    # esta en READ WRITE. Exit 0 = la base ACEPTA SQL (no solo que el proceso
+    # vive); 2/3/4/5 = aun inicializando; 1 = caida. Este es el chequeo que
+    # delata el gotcha de ORACLE_DATABASE (exit 3 para siempre).
+    $dbout = (docker exec oracle-db /opt/oracle/healthcheck.sh 2>&1) -join " "
+    Check "oracle-db: FREEPDB1 abierta y acepta SQL" ($LASTEXITCODE -eq 0) "exit=$LASTEXITCODE"
+
+    # La app responde /health con una consulta REAL (SELECT 1 FROM DUAL): un
+    # 200 prueba toda la cadena app -> listener -> PDB -> motor SQL. Se sondea
+    # desde el host con curl.exe por el puerto 18081, que el compose publica en
+    # loopback (la app no trae curl dentro y pasar codigo python por
+    # `docker exec` se rompe con las comillas de PowerShell).
+    $ap = (curl.exe -s http://localhost:18081/health 2>&1) -join " "
+    Check "oracle-app: /health OK (consulta real a Oracle)" ($ap -match 'ok') $ap
+
+    # Y que ESCRIBE: un hilo de la app inserta en heartbeat cada 15 s, asi que
+    # el contador tiene que crecer entre dos lecturas separadas. Prueba de que
+    # la app no solo lee la base sino que la alimenta.
+    $rb1 = (curl.exe -s http://localhost:18081/ 2>&1) -join ""
+    Start-Sleep -Seconds 17
+    $rb2 = (curl.exe -s http://localhost:18081/ 2>&1) -join ""
+    $b1 = -1; $b2 = -1
+    if ($rb1 -match '"heartbeats"\s*:\s*(\d+)') { $b1 = [int]$Matches[1] }
+    if ($rb2 -match '"heartbeats"\s*:\s*(\d+)') { $b2 = [int]$Matches[1] }
+    Check "oracle-app: la tabla heartbeat crece (escritura en Oracle)" ($b1 -ge 0 -and $b2 -gt $b1) "antes=$b1 despues=$b2"
+  } catch { Check "App + Oracle" $false $_.Exception.Message }
 }
 
 "===== TOTAL FALLOS: $fail ====="
