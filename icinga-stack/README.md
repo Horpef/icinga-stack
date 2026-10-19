@@ -744,18 +744,22 @@ proyecto y la red de seguridad):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\verify.ps1              # 81 checks
-powershell -ExecutionPolicy Bypass -File .\verify.ps1 -CleanTest   # 68 checks
+powershell -ExecutionPolicy Bypass -File .\verify.ps1 -CleanTest   # 66 checks
 # ===== TOTAL FALLOS: 0 =====
 ```
 
-> La diferencia de 13 son los comprobadores que **solo corren en producción**:
+> La diferencia de 15 son los comprobadores que **solo corren en producción**:
 > los 3 de **`safety-net`** (es una herramienta del host, y una copia limpia no
-> la tiene), los 5 de **Wazuh** y los 5 de la **app + Oracle** (son stacks
-> aparte y `mk-clean-test` no los clona). Además, en clean-test los hosts de
-> esos dos stacks existen como **objetos** (sus `.conf` se copian, y deben
-> parsear) pero sus contenedores no están en la red del clean-test, así que
-> aparecen siempre caídos: `verify.ps1` los **excluye del «todos en OK»** —sin
-> dejar de comprobar que su configuración se carga— solo en ese modo.
+> la tiene), los 5 de **Wazuh**, los 5 de la **app + Oracle** y los 2 de la
+> **variable `Host` de Grafana** (los cuatro grupos dependen de los stacks
+> ajenos, que son proyectos aparte y `mk-clean-test` no clona). Además, en
+> clean-test los hosts de esos dos stacks existen como **objetos** (sus `.conf`
+> se copian, y deben parsear) pero sus contenedores no están en la red del
+> clean-test, así que aparecen siempre caídos: `verify.ps1` los **excluye del
+> «todos en OK»** —sin dejar de comprobar que su configuración se carga— solo
+> en ese modo. Y sus checks **ni resuelven ni emiten *perfdata***, de modo que
+> esos hosts no pueden aparecer en InfluxDB: por eso los 2 de la variable se
+> comprueban, como los demás, solo en producción.
 
 > **Tras un reinicio del stack** los checks que se apoyan en `Uptime`
 > necesitan más de 60 s de vida del contenedor **y** un ciclo de chequeo
@@ -786,6 +790,16 @@ docker compose -p clean-test -f .\_clean-test\docker-compose.yml logs -f directo
 docker compose -p clean-test -f .\_clean-test\docker-compose.yml down -v
 Remove-Item -Recurse -Force .\_clean-test
 ```
+
+> `mk-clean-test.ps1` no mantiene **ninguna lista a mano**: los puertos se
+> reescriben con el texto exacto del compose (las UIs van en `127.0.0.1`, no en
+> `0.0.0.0`) y los ficheros que copia se **derivan de los montajes del propio
+> compose**. Así, añadir un puerto o un montaje nuevo no deja el script
+> desactualizado en silencio — que es justo lo que había pasado dos veces:
+> cuando las UIs pasaron a loopback (el mapa seguía buscando `"8200:8200"` y no
+> casaba con `"127.0.0.1:8200:8200"`) y cuando entró
+> `influxdb/influxdb.conf` (la lista de copia no lo tenía, Docker creaba un
+> directorio vacío y el contenedor no arrancaba con *not a directory*).
 
 > **Ese orden es obligatorio, no una sugerencia.** `mk-clean-test.ps1` borra
 > y vuelve a crear `_clean-test/` entero. Si la copia ya está corriendo,

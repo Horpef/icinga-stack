@@ -282,15 +282,23 @@ try {
   # host dejara de emitir ping4 desapareceria del desplegable aunque el
   # dashboard siguiera montado y los paneles respondieran. Se comprueba
   # sobre el stack ajeno, que es lo que se acaba de dar de alta.
-  $tq = 'SHOW TAG VALUES FROM "hostalive" WITH KEY = "hostname"'
-  $tj = @(docker exec $cInflux influx -database icinga2 -execute $tq 2>&1) -join "`n"
-  $ts = ($tj -replace "`r?`n", " ")
-  Check "InfluxDB: los 3 hosts de Wazuh salen en la variable Host de Grafana" `
-        (($tj -match 'wazuh-manager') -and ($tj -match 'wazuh-indexer') -and ($tj -match 'wazuh-dashboard')) `
-        $ts.Substring(0, [Math]::Min(200, $ts.Length))
-  Check "InfluxDB: los 2 hosts de Oracle salen en la variable Host de Grafana" `
-        (($tj -match 'oracle-db') -and ($tj -match 'oracle-app')) `
-        $ts.Substring(0, [Math]::Min(200, $ts.Length))
+  #
+  # Solo en produccion: en clean-test los contenedores de Wazuh y Oracle NO
+  # estan en su red, sus checks no resuelven (UNKNOWN) ni emiten perfdata, asi
+  # que por definicion no pueden salir en `hostalive`. Exigirlo ahi seria pedir
+  # algo imposible y daria un falso FALLO. Verificado 2026-10-19: en el
+  # clean-test no hay rastro de wazuh/oracle en NINGUNA medicion.
+  if (-not $CleanTest) {
+    $tq = 'SHOW TAG VALUES FROM "hostalive" WITH KEY = "hostname"'
+    $tj = @(docker exec $cInflux influx -database icinga2 -execute $tq 2>&1) -join "`n"
+    $ts = ($tj -replace "`r?`n", " ")
+    Check "InfluxDB: los 3 hosts de Wazuh salen en la variable Host de Grafana" `
+          (($tj -match 'wazuh-manager') -and ($tj -match 'wazuh-indexer') -and ($tj -match 'wazuh-dashboard')) `
+          $ts.Substring(0, [Math]::Min(200, $ts.Length))
+    Check "InfluxDB: los 2 hosts de Oracle salen en la variable Host de Grafana" `
+          (($tj -match 'oracle-db') -and ($tj -match 'oracle-app')) `
+          $ts.Substring(0, [Math]::Min(200, $ts.Length))
+  }
 } catch { Check "InfluxDB" $false $_.Exception.Message }
 
 try {
