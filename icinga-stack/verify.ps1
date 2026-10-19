@@ -697,11 +697,26 @@ if (-not $CleanTest) {
     Check "Wazuh: regla 100100 cargada" ([int]$zrc -ge 1) "total_affected_items=$zrc"
 
     # 8c. El logcollector analiza tantos json como ficheros hay en el
-    # daemon. "Analyzing file" se emite a nivel INFO (no depende del debug
-    # que se activo durante la investigacion) y se acumula por arranque, de
-    # modo que sirve de cota inferior del seguimiento.
+    # daemon. "Analyzing file" se emite a nivel INFO cuando el logcollector
+    # EMPIEZA a seguir un fichero, y se acumula. Fragilidad real: logrotate
+    # hace copytruncate de ossec.log a medianoche UTC (no deja ni .1), asi
+    # que esas lineas desaparecen aunque el logcollector siga trabajando ->
+    # falso negativo. Para que la evidencia sea SIEMPRE fresca se fuerza un
+    # `wazuh-control reload`: reinicia el logcollector (y syscheckd/modulesd/
+    # execd) SIN tocar agentd, de modo que el agente no se desconecta, y el
+    # logcollector vuelve a registrar los ficheros re-emitiendo la linea.
+    # Verificado 2026-10-17: el SIGHUP NO re-emite; el reload si (13 -> 26).
     $zjf = (docker exec wazuh-agent-icinga sh -c "ls /var/lib/docker/containers/*/*-json.log | wc -l") -join ''
-    $zaf = (docker exec wazuh-agent-icinga sh -c "grep 'Analyzing file' /var/ossec/logs/ossec.log | grep -c json.log") -join ''
+    docker exec wazuh-agent-icinga /var/ossec/bin/wazuh-control reload | Out-Null
+    # El reload tarda unos segundos; se sondea el conteo hasta alcanzar el
+    # numero de ficheros (tope 25 s por si algo no arranca).
+    $zaf = 0
+    $t8c = 0
+    do {
+        Start-Sleep -Seconds 2
+        $t8c += 2
+        $zaf = [int](((docker exec wazuh-agent-icinga sh -c "grep 'Analyzing file' /var/ossec/logs/ossec.log | grep -c json.log") -join '').Trim())
+    } while (($zaf -lt [int]$zjf) -and ($t8c -lt 25))
     Check "Wazuh: logcollector analiza todos los json de contenedores" `
           (([int]$zaf -ge [int]$zjf) -and ([int]$zjf -ge 1)) "analizados=$zaf json=$zjf"
 
