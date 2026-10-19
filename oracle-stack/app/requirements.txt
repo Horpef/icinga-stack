@@ -4,4 +4,4 @@
 #   cryptography-> lo exige oracledb thin para el cifrado de la sesion
 Flask==3.0.3
 oracledb==2.4.1
-cryptography==43.0.1
+cryptography==50.0.0
