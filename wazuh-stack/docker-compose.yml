@@ -145,7 +145,10 @@ services:
       # no aporta nada (el propio panel ya va con TLS dentro) y el 8443 ya
       # lo lleva Icinga Web, asi que el rango de puertos altos queda legible
       # (8080/8443 web, 3000 grafana, 5601 wazuh, 8200 duplicati).
-      - "5601:5601"
+      # Como el resto de UIs, solo en localhost (127.0.0.1): decision
+      # 2026-10-16 (roadmap). Los puertos de servicio de Wazuh (1514/1515/
+      # 55000) siguen en 0.0.0.0.
+      - "127.0.0.1:5601:5601"
     environment:
       - INDEXER_USERNAME=admin
       - INDEXER_PASSWORD=icingaadmin123

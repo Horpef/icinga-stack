@@ -136,8 +136,13 @@ services:
     volumes:
       - mailpit_data:/data
     ports:
-      - "8025:8025"
-      - "1025:1025"
+      # UIs (y el SMTP de captura) solo en localhost: 127.0.0.1. Son paneles
+      # para el operador local, no servicios de red: exponerlos a 0.0.0.0 los
+      # abria a toda la LAN sin necesidad. Los puertos de SERVICIO (5665 de la
+      # API de Icinga, 1514/1515/55000 de Wazuh) siguen en 0.0.0.0 porque los
+      # usan otros contenedores y verify.ps1. Decision 2026-10-16 (roadmap).
+      - "127.0.0.1:8025:8025"   # panel web de Mailpit
+      - "127.0.0.1:1025:1025"   # SMTP de captura (Icinga le manda aqui por la red docker)
     networks:
       - icinga-net
     restart: unless-stopped
@@ -208,7 +213,7 @@ services:
       # Provisioned dashboards are files; don't let the UI overwrite them.
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/icinga-stack.json
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"   # Grafana (UI)
     volumes:
       - grafana_data:/var/lib/grafana
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -328,8 +333,8 @@ services:
     image: icinga-stack-web:latest
     container_name: icinga-web
     ports:
-      - "8080:8080"
-      - "8443:8443"
+      - "127.0.0.1:8080:8080"   # Icinga Web (HTTP)
+      - "127.0.0.1:8443:8443"   # Icinga Web (HTTPS)
     environment:
       ICINGA2_HOST: icinga2
       ICINGA2_PORT: 5665
@@ -516,7 +521,7 @@ services:
       # El planificador usa la hora local del contenedor: 03:00 UTC-3.
       TZ: America/Argentina/Buenos_Aires
     ports:
-      - "8200:8200"
+      - "127.0.0.1:8200:8200"   # Duplicati (UI de copias)
     volumes:
       # Base de datos de Duplicati: que copias existen, historial, opciones.
       - duplicati_config:/data
