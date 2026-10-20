@@ -139,12 +139,45 @@ No se aprende Icinga leyéndolo: rompiéndolo a propósito y mirando qué pasa.
 **Criterio de hecho**: sabes de memoria cuánto tarda cada alerta en llegar,
 qué haces cuando llega, y qué prueba la está vigilando a ella.
 
+### Medido el 2026-10-20 (parar `oracle-db` a propósito)
+
+`docker compose stop oracle-db` a las 20:04:36 UTC y `start` a las 20:11:47.
+
+| Momento | Qué pasa |
+|---|---|
+| T+10 s | `Oracle DB - Listener (1521)` → CRITICAL (blando) |
+| T+50 s | host `oracle-db` → **DOWN**: `check_ping: Invalid hostname/address - oracle-db` |
+| T+60 s | `Oracle App - Salud app+BD` → CRITICAL (`HTTP/1.1 500 INTERNAL SERVER ERROR`) |
+| T+118 s | correo **Host … is DOWN!** |
+| T+201 s | correo **Salud app+BD … is CRITICAL!** (`HTTP 500`) |
+| al arrancar, T+7 s | correo **Host … is UP!** (`PING OK`, 0,78 ms) |
+| al arrancar, T+69 s | correo **Salud app+BD … is OK!** (`HTTP 200`, 0,013 s) |
+
+Lo que enseña (y no está en la doc):
+
+1. **El puerto 8080 siguió `OK` todo el rato.** App viva + BD muerta = el check
+   de puerto no ve nada; el que avisa es `/health`. Es exactamente el motivo por
+   el que ese servicio existe.
+2. **El host cae primero, y por DNS**: al parar el contenedor Docker deja de
+   resolver `oracle-db`, así que `check_ping` no falla por paquetes perdidos
+   sino con `Invalid hostname/address`. Es un DOWN de *resolución*.
+3. **El host DOWN silencia los servicios de ese host**: el `Listener` se quedó
+   en CRITICAL pero **no envió ni un correo** (0 mensajes con «Listener» en
+   Mailpit). Es lo correcto (evita la tormenta), pero deja menos diagnóstico: el
+   correo que explica el fallo es el de `/health`, que vive en **otro** host.
+4. **La app se recupera sola**: no hubo que reiniciar `oracle-app`; el pool de
+   `oracledb` descartó las conexiones muertas y volvió a `OK` en 0,013 s.
+
 ## Fase 4 · Crecer
 
 **Cuándo**: solo cuando el número de stacks o de nodos lo justifique.
 
 - **2-3 stacks** → sacar Duplicati a su propio compose. Antes, no: un solo
   trabajo con varios JSON es más fácil de vigilar que dos servicios.
+  **Decidido el 2026-10-20 (con 3 stacks): se pospone a propósito** — ver la
+  fila correspondiente en «Decisiones ya tomadas»; el coste (volumen
+  `duplicati_config` + perder Duplicati en el clean-test) supera al beneficio
+  mientras todo viva en un solo host.
 - **Swarm / Kubernetes** → solo cuando haya más de un host que mantener.
   Hoy una máquina con 11 contenedores no pide orquestación, pide que los
   backups funcionen.
@@ -160,6 +193,8 @@ qué haces cuando llega, y qué prueba la está vigilando a ella.
   de vulnerabilidades), no los contenedores del stack de monitorización (todos
   por debajo del 10 %). El aviso es **real**: se documenta y se amplían vCPU;
   **no** se sube el umbral para taparlo (sería lo contrario de la Fase 3).
+  Y además hace **ruido**: entre las 19:45 y las 20:18 el check notificó **6
+  veces** y llegó a CRITICAL con load **16,7** (4,2× los núcleos).
 - Mismo criterio que todo lo demás: declarativo, idempotente, con su check en
   `verify.ps1`. Si no se puede verificar, no se hace.
 
@@ -190,6 +225,7 @@ qué haces cuando llega, y qué prueba la está vigilando a ella.
 | El gotcha de `ORACLE_DATABASE` (documentado, 2026-10-19) | `ORACLE_DATABASE: FREEPDB1` **rompe** el arranque: el entrypoint ya crea `FREEPDB1` por defecto y, declarado, intenta una segunda creación que falla con `ORA-65012`; deja el flag `/opt/oracle/hc-pdb-create` → healthcheck **`3` (unhealthy) para siempre** y `APP_USER` **sin crear**. Síntoma: el PDB está en `READ WRITE` pero `select username from cdb_users where username='APP'` sale vacío (ojo: `dba_users` del root tampoco lo lista, es un usuario **local** del PDB). Se deja el default. Ver `oracle-stack/README.md` |
 | `verify.ps1`: en clean-test los stacks ajenos entran como **objetos** pero se **excluyen del «todos en OK»** (2026-10-19) | Los `.conf` de Wazuh/Oracle se copian enteros en el clean-test (y deben: así se valida que parsean en `icinga2 daemon -C`), pero sus contenedores viven en `monitoring-net`, red que el clean-test **no comparte** → sus checks caen siempre y no es un fallo del stack que se prueba. Los recuentos suben a **11 hosts / 45 servicios** (iguales en los dos modos, porque los `.conf` se cargan en ambos) y, **solo en clean-test**, se filtran esos 5 hosts del «todos en OK». Además, sus checks **ni resuelven ni emiten *perfdata*** (no están en la red), así que esos hosts no pueden aparecer en InfluxDB: los 2 comprobadores de la variable `Host` de Grafana (que los busca en `hostalive`) son **también de producción** → la diferencia entre modos queda en **15 comprobadores** (81 en producción / 66 en clean-test) |
 | Montar un fichero que aún no existe → Docker crea un **directorio** (2026-10-19) | Al montar `D:/docker/oracle-stack/README.md` en Duplicati **antes** de crear el fichero, Docker creó un **directorio** con ese nombre en el host; el montaje quedó «pegado» a un directorio y al escribir el fichero el contenedor ya no arrancaba (`not a directory`). Moraleja: **crear el fichero antes** de declarar su `volumes:`/`Sources`, o recrear el contenedor con `--force-recreate` (el `up -d` normal reutiliza el contenedor viejo y sigue fallando) |
+| **Fase 4: Duplicati NO se saca (aún) a su propio compose** (2026-10-20) | El criterio escrito decía «2-3 stacks → sacar Duplicati a su propio compose», y con `oracle-stack` se cumplió (3). Se **pospone a propósito** porque el coste no compensa todavía: (1) el volumen `duplicati_config` guarda los **3 trabajos**; moverlo obliga a renombrar el volumen (o fijar su `name:` externo) y un error ahí se lleva por delante la única copia de la configuración de las copias; (2) sacar Duplicati de `icinga-stack` lo saca también del **clean-test**, y con él las **~20 comprobaciones** más valiosas del sistema (restauración con SHA256, retención, planificación, orígenes): mantenerlas exigiría levantar **dos composes** en la red aislada, más maquinaria que beneficio; (3) en **un solo host** la independencia de ciclo de vida no aporta nada operativo. Criterio para hacerlo: **cuando haya un segundo host** (ahí sí importa que las copias tengan vida propia y el clean-test se puede partir en dos) |
 | `mk-clean-test.ps1` **sin listas a mano** (2026-10-19) | El clean-test llevaba tiempo **roto sin que nadie lo viera** (no se había vuelto a lanzar desde el endurecimiento de las UIs): (1) los puertos del compose son `"127.0.0.1:8200:8200"` pero el mapa buscaba `'"8200:8200"'` — **con comilla delante** — así que `.Replace` no casaba y **todos** los puertos quedaban iguales a producción (`up` moría con `Bind for 127.0.0.1:1025 failed`); (2) la lista de ficheros a copiar no incluía `influxdb/`, Docker creaba un directorio vacío en su lugar y el contenedor no arrancaba (`not a directory`). Peor: la guarda que debía avisar buscaba esas mismas cadenas ya obsoletas, así que era **ciega**. Arreglo doble: el mapa usa el **texto exacto** del compose y la guarda se **autovalida recorriendo su propio mapa**; y la lista de copia se **deriva de los montajes `./…` del compose** (con `throw` si un montaje no existe). Así no puede volver a quedarse desactualizado en silencio. Verificado 2026-10-19: clean-test levanta (12 contenedores) y `verify.ps1 -CleanTest` → **TOTAL FALLOS: 0** en **66 comprobadores** |
 
 ## Qué hay que ampliar cuando entre un stack nuevo
