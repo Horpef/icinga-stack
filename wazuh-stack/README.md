@@ -66,7 +66,9 @@ llegan por la red sin publicar nada.
 
 ### RAM (no es capricho)
 
-El equipo tiene 15,9 GB y Docker ve ~7,7 GB, de los que icinga-stack ya ocupa
+El equipo tiene 15,9 GB y la VM de Docker **11 GB** (subida desde los 7,7 GB por
+defecto el 2026-10-20: con 8 GB vivia con 164 MB libres y un 16 % de iowait;
+ahora queda ~1,4 GB libre y 5,7 GB en cache), de los que icinga-stack ya ocupa
 ~1,3 GB. Sin limites, el indexer (JVM) se come el presupuesto y **el primero en
 resbalar seria Icinga, que es el que avisa**. Por eso todo va acotado:
 

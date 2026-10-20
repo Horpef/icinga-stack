@@ -86,8 +86,9 @@ Icinga se pone CRITICAL. Un chequeo de puerto no veria esa diferencia.
 
 ## RAM (no es capricho) y memoria de Oracle
 
-El equipo tiene ~7,7 GB dentro de la VM de Docker y el stack de Wazuh ya
-reserva ~5,3 GB en *limites*. Oracle 23ai Free necesita bastante memoria, asi
+El equipo tiene **11 GB dentro de la VM de Docker** (los 4 nucleos del i3-9100F)
+y el stack de Wazuh ya reserva ~5,3 GB en *limites*. Oracle 23ai Free necesita
+bastante memoria, asi
 que aqui se le pone un **tope de 2 GB** (`mem_limit`, del que se autoconfigura
 el SGA/PGA) y se mapea `shm_size: 1g` (Oracle usa `/dev/shm`; con el default de
 Docker, 64 MB, el arranque puede fallar con `ORA-00845`; el tmpfs solo consume

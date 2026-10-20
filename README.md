@@ -63,9 +63,10 @@ powershell -ExecutionPolicy Bypass -File .\verify.ps1
 
 ## Requisitos
 
-Docker Desktop con WSL2. El conjunto pide **~8 GB de RAM**; va justo, así que
-cada stack lleva sus `mem_limit` puestos a conciencia (ver los READMEs antes de
-subirlos). Los datos de los stacks viven en volúmenes de Docker; las copias, en
+Docker Desktop con WSL2. La VM tiene **11 GB** (`%USERPROFILE%\.wslconfig`; el
+porqué está en `icinga-stack/roadmap.md`: con los 8 GB por defecto vivía con
+164 MB libres y un 16 % de iowait). Aun así cada stack lleva sus `mem_limit`
+puestos a conciencia (ver los READMEs antes de subirlos). Los datos de los stacks viven en volúmenes de Docker; las copias, en
 `C:\docker-backups` (otro disco).
 
 ## Plan y decisiones

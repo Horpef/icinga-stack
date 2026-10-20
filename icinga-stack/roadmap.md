@@ -186,22 +186,26 @@ Lo que enseña (y no está en la doc):
   stacks** (Wazuh y Oracle incluidos) y el plugin vigila las **3 copias**
   declaradas. (Este punto decía «hoy volca los 12 del stack de monitorización»:
   se quedó escrito antes de que existieran los stacks #2 y #3.)
-- **La VM ya usa los 4 núcleos del equipo: no hay vCPU que dar.** Medido el
-  2026-10-20: el host es un **i3-9100F (4 núcleos / 4 hilos, 15,9 GB)** y Docker
-  Desktop ya tiene los 4 y 8 GB, con **~164 MB libres** en la VM (3,4 GB en
-  caché): hay **presión de memoria**, que es de donde sale buena parte del
-  16 % de `io`. Con los 18 contenedores, `icinga2!load` está en **WARNING
-  sostenido** (load 9-11; *scaled* 1.8-2.7; 33 % `usr` / 25 % `sys` / 16 % `io`
-  / 19 % `idle`) y llega a **CRITICAL** en los picos (16,7 al reconstruir la
+- **La VM ya usa los 4 núcleos del equipo: no había vCPU que dar. El problema
+  era la RAM, y está subida a 11 GB.** Medido el 2026-10-20: el host es un
+  **i3-9100F (4 núcleos / 4 hilos, 15,9 GB)** y Docker Desktop ya tenía los 4
+  núcleos y los 8 GB por defecto (50 % del host). En la VM quedaban **~164 MB
+  libres** y un **16 % de `io`**; `icinga2!load` en WARNING sostenido (load
+  9-11; 2,2-2,7 por núcleo) y CRITICAL en los picos (16,7 al reconstruir la
   imagen y reiniciar Oracle), con **6 notificaciones entre las 19:45 y las
-  20:18**. El consumidor mayor es **`wazuh-modulesd`** (~31-65 %, detección de
-  vulnerabilidades), no los contenedores del stack (todos < 10 %). Salidas, por
-  orden: (a) **más RAM a la VM** (8 → 11-12 GB de los 15,9): ataca la causa
-  (menos I/O, menos `io`); (b) **calibrar el umbral de `load` con los datos
-  medidos** (p. ej. 12/20), porque el 5/10 por defecto es *total*, pensado para
-  equipos con más núcleos, y en este genera ruido permanente; (c) bajar el
-  apetito de Wazuh (detección de vulnerabilidades). Lo que **no** vale es
-  mirar para otro lado: hoy el aviso es cierto.
+  20:18**. El consumidor mayor es **`wazuh-modulesd`** (~31-98 %, detección de
+  vulnerabilidades), no los contenedores del stack (todos < 10 %).
+  **Arreglado**: `%USERPROFILE%\.wslconfig` con `[wsl2] memory=11GB` y
+  `processors=4` (el máximo del equipo). En WSL2 el límite **no** se pone en la
+  pestaña Advanced de Docker Desktop, que solo aplica a Hyper-V. Resultado
+  medido: **1.375 MB libres, 5,7 GB en caché y `io` al 2 %** (antes 164 MB y
+  16 %). El umbral de `load` **no se tocó**: ya estaba calibrado a 1,5/3,0
+  **por núcleo** (`load_percpu`) justo para no repetir la falsa alarma del 5/10
+  absoluto que documenta `hosts.conf`; si sigue avisando en reposo es que el
+  hierro va justo, y taparlo sería lo contrario de la Fase 3. **Pendiente**:
+  medir el `load` en reposo (el arranque de Wazuh ocupa ~98 % de un núcleo
+  durante varios minutos) y, si sigue alto, bajar el apetito de Wazuh o más
+  núcleos.
 - Mismo criterio que todo lo demás: declarativo, idempotente, con su check en
   `verify.ps1`. Si no se puede verificar, no se hace.
 
