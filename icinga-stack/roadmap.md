@@ -148,8 +148,18 @@ qué haces cuando llega, y qué prueba la está vigilando a ella.
 - **Swarm / Kubernetes** → solo cuando haya más de un host que mantener.
   Hoy una máquina con 11 contenedores no pide orquestación, pide que los
   backups funcionen.
-- Ampliar `safety-net.ps1` a los volúmenes nuevos (hoy volca los 12 del stack
-  de monitorización) y el plugin de copias a los stacks nuevos.
+- Ampliar `safety-net.ps1` a los volúmenes nuevos y el plugin de copias a los
+  stacks nuevos: **hecho**. `safety-net` volca ya los **31 volúmenes de los 3
+  stacks** (Wazuh y Oracle incluidos) y el plugin vigila las **3 copias**
+  declaradas. (Este punto decía «hoy volca los 12 del stack de monitorización»:
+  se quedó escrito antes de que existieran los stacks #2 y #3.)
+- **Más vCPU para la VM de Docker.** Medido el 2026-10-20 con 4 vCPU y los 18
+  contenedores de los 3 stacks: `icinga2!load` en **WARNING sostenido**
+  (load 9-11; *scaled* 1.8-2.7; 33 % `usr` / 25 % `sys` / **16 % `io`** /
+  19 % `idle`). El consumidor mayor es **`wazuh-modulesd`** (~31 %, detección
+  de vulnerabilidades), no los contenedores del stack de monitorización (todos
+  por debajo del 10 %). El aviso es **real**: se documenta y se amplían vCPU;
+  **no** se sube el umbral para taparlo (sería lo contrario de la Fase 3).
 - Mismo criterio que todo lo demás: declarativo, idempotente, con su check en
   `verify.ps1`. Si no se puede verificar, no se hace.
 
